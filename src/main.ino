@@ -59,6 +59,7 @@ String smodo_riego[]={"MAN ", "PROG", "VER ", "AUTO"};
 volatile int modo_priego = 0;		// 0:MAN, 1:PROG, 2:VER, 3:AUTO
 volatile bool flag_update_lcd = false;
 volatile bool flag_botonera = false;
+volatile bool menu_mostrado = false;
 enum modo_priego { MAN=0, PROG, VER, AUTO };
 
 // pulsadores o botones del programador de riego
@@ -273,9 +274,9 @@ ISR(PCINT0_vect) {
 		Serial.println("MODO AUTO");
 		modo_priego = AUTO;
 	}
-
-	// Limpiar Terminal Virtual al cambiar de modo
-    Serial.write(12);
+	
+    Serial.write(12);			// Limpiar Terminal Virtual al cambiar de modo
+	menu_mostrado = false; 		// Forzar pintar menú
 	
 	// Si salimos de Manual, apagar válvulas por seguridad
     if (modo_priego != MAN) {
@@ -398,9 +399,6 @@ int readInt(String prompt) {
     
     // Imprimir el mensaje si no está vacío
     if (prompt != "") Serial.print(prompt);
-    
-    // Limpiar buffer previo
-    while(Serial.available()) Serial.read();
 
     while (!inputDone) {
         // Verificar si salimos del modo PROG mientras esperamos input
@@ -411,6 +409,11 @@ int readInt(String prompt) {
             if (isDigit(c)) {
                 inputString += c;
                 Serial.print(c);
+            } else if (c == '\b' || c == 127) { 
+                if (inputString.length() > 0) {
+                    inputString.remove(inputString.length() - 1); 	// Borrar de la variable
+                    Serial.print("\b \b"); 							// Efecto visual: Retroceder, Espacio, Retroceder
+                }
             } else if (c == '\r' || c == '\n') {
                 inputDone = true;
                 Serial.println();
@@ -565,8 +568,6 @@ void loop() {
 
 	// Que día se ve en pantalla
     if (modo_priego != VER) view_day = current_day;
-
-	static bool menu_mostrado = false;
 
 	// Máquina de Estados Principal 
     switch(modo_priego) {
