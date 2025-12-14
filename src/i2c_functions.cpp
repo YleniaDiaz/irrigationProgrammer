@@ -220,3 +220,39 @@ void setPCA_Output(byte valor) {
     i2c_rbit();
     i2c_stop();
 }
+
+// Definición de variables RTC
+volatile int current_sec = 0;
+volatile int current_min = 0;
+volatile int current_hour = 0;
+volatile int current_day = 1;
+
+// Función auxiliar para convertir BCD a Decimal
+byte bcdToDec(byte val) {
+  return ( (val/16*10) + (val%16) );
+}
+
+// Función para leer la hora del RTC DS3232
+void readRTC() {
+    i2c_start();
+    i2c_write_byte(D_DS3232);       // Dirección de escritura (0xD0)
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    i2c_write_byte(0x00);           // Puntero a registro 0 (Segundos)
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    
+    i2c_start();                    // Restart
+    i2c_write_byte(D_DS3232 | 1);   // Dirección de lectura (0xD1)
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    
+    // Leer datos
+    current_sec = bcdToDec(i2c_read_byte());
+    i2c_w0(); // ACK
+    current_min = bcdToDec(i2c_read_byte());
+    i2c_w0(); // ACK
+    current_hour = bcdToDec(i2c_read_byte());
+    i2c_w0(); // ACK
+    current_day = bcdToDec(i2c_read_byte());
+    i2c_w1(); // NACK (último dato)
+    
+    i2c_stop();
+}

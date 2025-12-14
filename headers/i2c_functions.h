@@ -33,3 +33,13 @@ byte randomRead(int address);
 void initPCA();
 byte getPCA_Input();
 void setPCA_Output(byte valor);
+
+// Variables globales del RTC (extern para ser accesibles desde main)
+extern volatile int current_sec;
+extern volatile int current_min;
+extern volatile int current_hour;
+extern volatile int current_day;
+
+// Funciones auxiliares RTC
+byte bcdToDec(byte val);
+void readRTC();

@@ -97,6 +97,7 @@ void teclado(int col);
 void setBuffer(int row, int col);
 void readLastKeyboardRow(int col);
 int readInt (String prompt);
+void printTwoDigits(int number);
 
 void setup() {
 	// CANALES SERIE
@@ -305,47 +306,58 @@ ISR(PCINT0_vect) {
 
 // INTERRUPCION PANTALLA
 ISR(TIMER1_OVF_vect) {
-	// Refresco de textos fijos y estados
-    
-    // Linea 1: Modo
+    // LINEA 1
     Serial3.write(0xFE); 
-    Serial3.write(0x80); 	// Posicionar inicio L1
+    Serial3.write(0x80); // Ir al inicio de Linea 1
     
-    if (modo_priego == MAN) Serial3.print("MODO: MANUAL   ");
-    else if (modo_priego == PROG) Serial3.print("MODO: PROG     ");
-    else if (modo_priego == VER) Serial3.print("MODO: VER      ");
-    else if (modo_priego == AUTO) Serial3.print("MODO: AUTO     ");
+    // Imprimir Día (ej: "D1")
+    Serial3.print("D");
+    Serial3.print(current_day);
+    
+    // Espaciado
+    Serial3.print("  "); 
+    
+    // Imprimir Hora (ej: "19:22:19")
+    printTwoDigits(current_hour);
+    Serial3.print(":");
+    printTwoDigits(current_min);
+    Serial3.print(":");
+    printTwoDigits(current_sec);
+    
+    // Espaciado
+    Serial3.print("   ");
+    
+    // Imprimir Modo (ej: "MAN")
+    // Usamos el array smodo_riego[]={"MAN ", "PROG", ...}
+    // Como las cadenas tienen 4 caracteres, ajustamos visualmente
+    Serial3.print(smodo_riego[modo_priego]); 
 
-    // Linea 3: R0 (Estado Válvula 0)
-    Serial3.write(0xFE); 
-    Serial3.write(0x94); 	// Posicionar inicio L3 (Dirección 148)
+    // R0 (Línea 3)
+    Serial3.write(0xFE); Serial3.write(0x94);
     Serial3.print("R0: ");
     if (estado_valvulas & 1) Serial3.print("ON "); else Serial3.print("OFF");
     
-    // Linea 4: R1 (Estado Válvula 1)
-    Serial3.write(0xFE); 
-    Serial3.write(0xD4); 	// Posicionar inicio L4 (Dirección 212)
+    // R1 (Línea 4)
+    Serial3.write(0xFE); Serial3.write(0xD4);
     Serial3.print("R1: ");
     if (estado_valvulas & 2) Serial3.print("ON "); else Serial3.print("OFF");
 
-    // Blinking en modo Manual
+    // Blinking solo en Manual
     if (modo_priego == MAN) {
-        // Posicionar cursor donde queremos parpadeo        
-        Serial3.write(0xFE);
+        // Posicionar cursor para parpadeo (Columna 4 de la línea seleccionada)
+        Serial3.write(0xFE); 
         if (linea_seleccionada == 0) {
-            Serial3.write(0x94 + 4);	// L3 (0x94) + desplazamiento 4
+             Serial3.write(0x94 + 4); // Linea 3, pos 4
         } else {
-			Serial3.write(0xD4 + 4); 	// L4 (0xD4) + desplazamiento 4
+             Serial3.write(0xD4 + 4); // Linea 4, pos 4
         }
         
-        // Activar blinking (Comando 13 Milford)
-        Serial3.write(0xFE);
-        Serial3.write(0x0D);
+        // Activar cursor parpadeante (Comando 0x0D)
+        Serial3.write(0xFE); Serial3.write(0x0D); 
         
     } else {
-        //Apagar cursor en otros modos (Comando 12 Milford)
-        Serial3.write(0xFE);
-        Serial3.write(0x0C);
+        // Apagar cursor en otros modos (Comando 0x0C)
+        Serial3.write(0xFE); Serial3.write(0x0C); 
     }
 }
 
@@ -445,7 +457,16 @@ void readLastKeyboardRow(int col) {
 	}
 }
 
+void printTwoDigits(int number) {
+  if (number < 10) {
+    Serial3.print("0");
+  }
+  Serial3.print(number);
+}
+
 void loop() {
+	readRTC(); 		// Leer la hora
+
 	// Máquina de Estados Principal 
     switch(modo_priego) {
         //MODO MANUAL
