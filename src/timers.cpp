@@ -2,8 +2,8 @@
 
 // Programación del TIMER 1
 void timer1_init() {
-	EICRA |= (1 << ISC11) ;
-	EIMSK |= (1 << INT1);
+	//EICRA |= (1 << ISC11) ;
+	//EIMSK |= (1 << INT1);
 }
 
 // Programación del TIMER 3

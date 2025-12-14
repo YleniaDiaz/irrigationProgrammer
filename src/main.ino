@@ -69,6 +69,8 @@ volatile boolean p_right = true;
 
 // Estado de válvulas (Bit 0: LR0, Bit 1: LR1)
 byte estado_valvulas = 0;
+// Variable para seleccionar qué linea estamos controlando en manual (0 o 1)
+volatile int linea_seleccionada = 0;
 
 // Estructura de datos para la programación semanal del riego
 // LR[8][2] para poder usar índices 1-7 directamente (coincidiendo con RTC dayOfWeek)
@@ -142,6 +144,12 @@ void setup() {
 	pinMode(MODO_VER, INPUT_PULLUP);									// VER  PCINT1
 	pinMode(MODO_AUTOMATICO, INPUT_PULLUP);				// AUTO   PCINT0
 
+	// --- CORRECCIÓN 1: Leer estado inicial del mando ---
+    if (digitalRead(MODO_MANUAL) == LOW) modo_priego = MAN;
+    else if (digitalRead(MODO_PROGRAMACION) == LOW) modo_priego = PROG;
+    else if (digitalRead(MODO_VER) == LOW) modo_priego = VER;
+    else if (digitalRead(MODO_AUTOMATICO) == LOW) modo_priego = AUTO;
+
 	// sincronización del mando rotatorio por interrupciones
 	// habilitación de interrupciones PCINT0-3
 
@@ -155,6 +163,8 @@ void setup() {
 
 	/// EXPANSOR PCA9555
 	initPCA();
+	// --- CORRECCIÓN 2: Asegurar válvulas apagadas al inicio ---
+    setPCA_Output(0);
 
 	// inicialización estructura de datos (cualquier cosa o leer de EEPROM)
 	/*
@@ -247,13 +257,16 @@ ISR(TIMER3_COMPC_vect){
 //  ISR del switch rotatorio: PCINT0-1-2-3, pines: 53-52-51-50, Modos: AUTO-VER-PROG-MANUAL
 // PORTB[7:0] --> Pines: 13-12-11-10-50-51-52-53 (X-X-X-X-MANUAL-PROG-VER-AUTO)
 ISR(PCINT0_vect) {
-	if (digitalRead(MODO_MANUAL) == LOW) Serial.println("MODO MANUAL");
-	if (digitalRead(MODO_PROGRAMACION) == LOW) Serial.println("MODO PROGAMACION");
-	if (digitalRead(MODO_VER) == LOW) Serial.println("MODO VER");
-	if (digitalRead(MODO_AUTOMATICO) == LOW) Serial.println("MODO AUTOMATICO");
-
-	// Si salimos de Manual, apagar válvulas
-    if (modo_priego != 0) estado_valvulas = 0;
+	if (digitalRead(MODO_MANUAL) == LOW) { Serial.println("MODO MANUAL"); modo_priego = MAN; }
+	if (digitalRead(MODO_PROGRAMACION) == LOW) { Serial.println("MODO PROG"); modo_priego = PROG; }
+	if (digitalRead(MODO_VER) == LOW) { Serial.println("MODO VER"); modo_priego = VER; }
+	if (digitalRead(MODO_AUTOMATICO) == LOW) { Serial.println("MODO AUTO"); modo_priego = AUTO; }
+	
+	// Si salimos de Manual, apagar válvulas por seguridad
+    if (modo_priego != MAN) {
+        estado_valvulas = 0;
+        setPCA_Output(0);
+    }
 
 	/*int val = PINB & 0x0F;
 	// val = 0000 0111 -> MODO MAN
@@ -280,86 +293,44 @@ ISR(PCINT0_vect) {
 
 // INTERRUPCION PANTALLA
 ISR(TIMER1_OVF_vect) {
-	// setCursor(linea, columna);
-	// Hay que tener en cuenta poner 0 cuando la hora/minutos/segundos sean menor que 10
-	// Serial.print("D"+String(getDay()) + "         " + String(getHour()) + ":"  + String(getMInutes()) + ":" + String(getSeconds()) + "        " + "MODO");
-
-    // Ejemplo
+	// Refresco de LCD
     Serial3.write(0xFE); 
 	Serial3.write(0x80); // Linea 1
     
     if (modo_priego == 0) Serial3.print("MODO: MANUAL   ");
     else if (modo_priego == 1) Serial3.print("MODO: PROG     ");
+    else if (modo_priego == 2) Serial3.print("MODO: VER      ");
     else if (modo_priego == 3) Serial3.print("MODO: AUTO     ");
-    
-    // Mostrar estado válvulas en Linea 3
-    Serial3.write(0xFE); 
-	Serial3.write(0x94);
-    Serial3.print("V0: ");
+
+	// Mostrar estado válvulas en Linea 3 (R0) y Linea 4 (R1)
+    // R0 (Línea 3 del LCD)
+    Serial3.write(0xFE); Serial3.write(0x94);
+    Serial3.print("R0: ");
     if (estado_valvulas & 1) Serial3.print("ON "); else Serial3.print("OFF");
+    
+    // R1 (Línea 4 del LCD)
+    Serial3.write(0xFE); Serial3.write(0xD4);
+    Serial3.print("R1: ");
+    if (estado_valvulas & 2) Serial3.print("ON "); else Serial3.print("OFF");
+
+    // --- CORRECCIÓN 3: Parpadeo del cursor en MODO MANUAL ---
+    if (modo_priego == MAN) {
+        Serial3.write(0xFE); Serial3.write(0x4B); // Cursor Blink ON
+        if (linea_seleccionada == 0) {
+             Serial3.write(0xFE); Serial3.write(0x94 + 3); // Posicionar en R0 (Linea 3)
+        } else {
+             Serial3.write(0xFE); Serial3.write(0xD4 + 3); // Posicionar en R1 (Linea 4)
+        }
+    } else {
+        Serial3.write(0xFE); Serial3.write(0x4C); // Cursor Blink OFF
+    }
 }
 
 // ISR PCA9555
 ISR(INT1_vect){
-	// detección de pulsadores de la botonera  y actualización de las variables: p_left, p_off, p_on y p_right
-
-	// leer PORT0
-	int val = 0; //getPort0() & 0x0F;
-	switch(val) {
-		case 7:				// btn RIGHT
-			Serial.println("btn RIGHT");
-			p_right = 0;
-			break;
-		case 11:			// btn ON
-			Serial.println("btn ON");
-			p_on = 0;
-			break;
-		case 13:			// btn OFF
-			Serial.println("btn OFF");
-			p_off = 0;
-			break;
-		case 14:			// btn LEFT
-			Serial.println("btn LEFT");
-			p_left = 0;
-			break;
-		default:
-			break;
-	}
-}
-
-/*byte getPort0() {
-
-}*/
-
-void test_LCD() {
-	// Prueba del la pantalla LCD
-	// habilitar canal TX3/RX3, canal de comunicaciones serie con la pantalla LCD (MILFORD 4x20 BKP)
-	Serial3.begin(9600); 		//canal 3, 9600 baudios, 8 bits, no parity, 1 stop bit
-											
-	Serial3.write(0xFE); 
-	Serial3.write(0x01); 		//Clear Screen
-	delay(100);
-  
-	Serial3.write(0xFE); 
-	Serial3.write(0x00); 		// Cursor Home
-	delay(100);                       // posicionarse en línea 1
-	Serial3.write("L1: 123 Hola a todos"); 
-	delay(1000); // linea 1
-  
-	Serial3.write(0xFE); 
-	Serial3.write(0xC0); 		// posicionarse en linea 2
-	Serial3.write("L2: 456 Hola a todas"); 
-	delay(1000);  					// linea 2
-  
-	Serial3.write(0xFE); 
-	Serial3.write(0x94); 		// posicionarse en linea 3
-	Serial3.write("L3: 01234567890123456"); 
-	delay(1000);  					// linea 3
-  
-	Serial3.write(0xFE); 
-	Serial3.write(0xD4); 		// posicionarse en linea 4
-	Serial3.write("L4: abcdefghijklmnop"); 
-	delay(1000);  					// linea 4	
+	// --- CORRECCIÓN 4: Solo levantar bandera ---
+    // No hacemos I2C aquí dentro para evitar bloqueos
+    flag_botonera = true;
 }
 
 void showMenu() {
@@ -411,7 +382,9 @@ int readInt (String prompt) {
 
 // Control de válvulas de riego: valv0, valv1
 void set_valvula(int valvula, int estado) {
-
+	if (estado == 1) estado_valvulas |= (1 << valvula);
+    else estado_valvulas &= ~(1 << valvula);
+    setPCA_Output(estado_valvulas);
 }
 
 // exploración del teclado
@@ -457,21 +430,31 @@ void loop() {
         case 0: 
             if (flag_botonera) {
                 flag_botonera = false;
-                byte botones = getPCA_Input(); // Leer estado (Activo bajo)
+                
+                // Leemos el estado real de los botones por I2C
+                byte botones = getPCA_Input(); 
+                // Botones son Activos a Nivel BAJO (0 = pulsado)
+                // Bit 0: LEFT, Bit 1: OFF, Bit 2: ON, Bit 3: RIGHT
 
-                // Botón ON (Bit 2) enciende, OFF (Bit 1) apaga
-                // Depende de qué línea esté seleccionada.
-                // Si pulsa ON -> Abre Válvula 0. Si pulsa OFF -> Cierra V0.
-
-                if (!(botones & 0x04)) { // Botón ON presionado
-                    estado_valvulas |= 1; // Encender LR0
+                if (!(botones & 0x01)) { // LEFT pulsado
+                    linea_seleccionada = 0; // Seleccionar R0
+                    Serial.println("Select R0");
                 }
-                if (!(botones & 0x02)) { // Botón OFF presionado
-                    estado_valvulas &= ~1; // Apagar LR0
+                if (!(botones & 0x08)) { // RIGHT pulsado
+                    linea_seleccionada = 1; // Seleccionar R1
+                    Serial.println("Select R1");
                 }
-                setPCA_Output(estado_valvulas);
+                
+                if (!(botones & 0x04)) { // ON pulsado
+                    Serial.println("Válvula ON");
+                    set_valvula(linea_seleccionada, 1);
+                }
+                if (!(botones & 0x02)) { // OFF pulsado
+                    Serial.println("Válvula OFF");
+                    set_valvula(linea_seleccionada, 0);
+                }
             }
-            break;
+			break;
 
         //MODO PROGRAMACIÓN
         case 1:
