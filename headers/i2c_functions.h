@@ -33,3 +33,8 @@ byte randomRead(int address);
 void initPCA();
 byte getPCA_Input();
 void setPCA_Output(byte valor);
+
+byte decToBcd(byte val);
+byte bcdToDec(byte val);
+void setRTC_Time(byte second, byte minute, byte hour, byte dayOfWeek, byte dayOfMonth, byte month, byte year);
+byte* getRTC_DateTime();

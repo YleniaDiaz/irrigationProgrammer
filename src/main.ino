@@ -38,8 +38,8 @@ char teclado_map[][3]={ {'1','2','3'},
 						{'4','5','6'},
 						{'7','8','9'},
 						{'*','0','#'}};
-String dia[ ] = { "", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN" }; 	// day 1-7
-String mes[ ]={ "", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
+String dia[] = { "", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN" }; 	// day 1-7
+String mes[] = { "", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
 
 int day;
 int line;
@@ -59,6 +59,7 @@ String smodo_riego[]={"MAN ", "PROG", "VER ", "AUTO"};
 volatile int modo_priego = 0;		// 0:MAN, 1:PROG, 2:VER, 3:AUTO
 volatile bool flag_update_lcd = false;
 volatile bool flag_botonera = false;
+volatile bool flag_mostrar_menu = true;
 enum modo_priego { MAN=0, PROG, VER, AUTO };
 
 // pulsadores o botones del programador de riego
@@ -95,6 +96,19 @@ void teclado(int col);
 void setBuffer(int row, int col);
 void readLastKeyboardRow(int col);
 int readInt (String prompt);
+
+// Función para leer el mando
+void leer_mando_rotatorio() {
+    byte portVal = PINB; // Pines 50-53 (PB3-PB0)
+
+    if ((portVal & (1 << 3)) == 0) modo_priego = 0;      // MAN
+    else if ((portVal & (1 << 2)) == 0) modo_priego = 1; // PROG
+    else if ((portVal & (1 << 1)) == 0) modo_priego = 2; // VER
+    else if ((portVal & (1 << 0)) == 0) modo_priego = 3; // AUTO
+    
+    // Si cambiamos a PROG, forzamos que se vuelva a pintar el menú
+    if (modo_priego == 1) flag_mostrar_menu = true;
+}
 
 void setup() {
 	// CANALES SERIE
@@ -178,9 +192,11 @@ void setup() {
 	
     // Timers
     timer1_init(); 				// Timer 1: Refresco LCD (2Hz)
-    timer3_init();					// Timer 3: Barrido teclado/display (200Hz)
-	timerPCINT0_init(); 	// Timer Mando rotatorio
-	timer1OVF_init(); 		// Timer 1 OVF: pantalla LCD
+    timer3_init();				// Timer 3: Barrido teclado/display (200Hz)
+	timerPCINT0_init(); 		// Timer Mando rotatorio
+	timer1OVF_init(); 			// Timer 1 OVF: pantalla LCD
+
+	leer_mando_rotatorio();
 	
 	// Habilitar interrupciones
 	sei();
@@ -247,13 +263,12 @@ ISR(TIMER3_COMPC_vect){
 //  ISR del switch rotatorio: PCINT0-1-2-3, pines: 53-52-51-50, Modos: AUTO-VER-PROG-MANUAL
 // PORTB[7:0] --> Pines: 13-12-11-10-50-51-52-53 (X-X-X-X-MANUAL-PROG-VER-AUTO)
 ISR(PCINT0_vect) {
-	if (digitalRead(MODO_MANUAL) == LOW) Serial.println("MODO MANUAL");
-	if (digitalRead(MODO_PROGRAMACION) == LOW) Serial.println("MODO PROGAMACION");
-	if (digitalRead(MODO_VER) == LOW) Serial.println("MODO VER");
-	if (digitalRead(MODO_AUTOMATICO) == LOW) Serial.println("MODO AUTOMATICO");
+	leer_mando_rotatorio();
 
-	// Si salimos de Manual, apagar válvulas
-    if (modo_priego != 0) estado_valvulas = 0;
+    // Si salimos de modo Manual, apagar válvulas inmediatamente
+    if (modo_priego != 0) {
+        estado_valvulas = 0;
+    }
 
 	/*int val = PINB & 0x0F;
 	// val = 0000 0111 -> MODO MAN
@@ -280,23 +295,86 @@ ISR(PCINT0_vect) {
 
 // INTERRUPCION PANTALLA
 ISR(TIMER1_OVF_vect) {
-	// setCursor(linea, columna);
-	// Hay que tener en cuenta poner 0 cuando la hora/minutos/segundos sean menor que 10
-	// Serial.print("D"+String(getDay()) + "         " + String(getHour()) + ":"  + String(getMInutes()) + ":" + String(getSeconds()) + "        " + "MODO");
+	// Leer fecha y hora actual del RTC
+    byte* tiempo = getRTC_DateTime(); // [seg, min, hour, dWeek, dMonth, month, year]
+    
+    // LINEA 1: DÍA - HORA - MODO
+    Serial3.write(0xFE); Serial3.write(0x80); // Ir al principio L1
+    
+    // Día semana
+    Serial3.print("D"); Serial3.print(tiempo[3]); Serial3.print(" ");
+    
+    // Hora HH:MM:SS
+    if(tiempo[2]<10) Serial3.print("0"); Serial3.print(tiempo[2]); Serial3.print(":");
+    if(tiempo[1]<10) Serial3.print("0"); Serial3.print(tiempo[1]); Serial3.print(":");
+    if(tiempo[0]<10) Serial3.print("0"); Serial3.print(tiempo[0]);
+    
+    // Modo (Derecha)
+    Serial3.print("   "); // Espaciado
+    switch(modo_priego) {
+        case 0: 
+			Serial3.print("MAN ");
+			break;
+        case 1: 
+			Serial3.print("PROG");
+			break;
+        case 2:
+			Serial3.print("VER ");
+			break;
+        case 3:
+			Serial3.print("AUTO");
+			break;
+    }
 
-    // Ejemplo
-    Serial3.write(0xFE); 
-	Serial3.write(0x80); // Linea 1
+    // LINEAS 2 y 3: ESTADO DE RIEGO    
+	// R0 (Línea 3 del LCD - dirección 0x94)
+    Serial3.write(0xFE); Serial3.write(0x94);
+    Serial3.print("R0: ");
     
-    if (modo_priego == 0) Serial3.print("MODO: MANUAL   ");
-    else if (modo_priego == 1) Serial3.print("MODO: PROG     ");
-    else if (modo_priego == 3) Serial3.print("MODO: AUTO     ");
+    // R1 (Línea 4 del LCD - dirección 0xD4)
+    Serial3.write(0xFE);
+	Serial3.write(0xD4); 		// Preparamos pero escribimos el texto luego para mantener orden visual
+    String lineaR1 = "R1: "; 	// Buffer temporal para R1
+
+    // Variables para el estado a mostrar
+    int est0, est1;
     
-    // Mostrar estado válvulas en Linea 3
+    if (modo_priego == 0) { 
+        // En MODO MANUAL, mostramos el estado actual real de las válvulas
+        // estado_valvulas bit 0 es R0, bit 1 es R1
+        est0 = (estado_valvulas & 0x01) ? 1 : 0;
+        est1 = (estado_valvulas & 0x02) ? 1 : 0;
+    } else {
+        // En otros modos, mostrar lo programado para hoy
+        est0 = LR[tiempo[3]][0].estado;
+        est1 = LR[tiempo[3]][1].estado;
+    }
+
+    // MOSTRAR R0
     Serial3.write(0xFE); 
-	Serial3.write(0x94);
-    Serial3.print("V0: ");
-    if (estado_valvulas & 1) Serial3.print("ON "); else Serial3.print("OFF");
+	Serial3.write(0x94); // Mover cursor a L3
+    Serial3.print("R0: ");
+    if (est0 == 0) Serial3.print("OFF     ");
+    else if (est0 == 1) Serial3.print("ON      ");
+    else if (modo_priego != 0) { // Solo mostrar horas en Auto/Ver/Prog
+        struct hora h = LR[tiempo[3]][0].hi;
+        if(h.hh<10) Serial3.print("0"); Serial3.print(h.hh); Serial3.print(":");
+        if(h.mm<10) Serial3.print("0"); Serial3.print(h.mm); Serial3.print(":");
+        if(h.ss<10) Serial3.print("0"); Serial3.print(h.ss);
+    }
+
+    // MOSTRAR R1
+	Serial3.write(0xFE); 
+	Serial3.write(0xD4); // Mover cursor a L4
+    Serial3.print("R1: ");
+    if (est1 == 0) Serial3.print("OFF     ");
+    else if (est1 == 1) Serial3.print("ON      ");
+    else if (modo_priego != 0) {
+        struct hora h = LR[tiempo[3]][1].hi;
+        if(h.hh<10) Serial3.print("0"); Serial3.print(h.hh); Serial3.print(":");
+        if(h.mm<10) Serial3.print("0"); Serial3.print(h.mm); Serial3.print(":");
+        if(h.ss<10) Serial3.print("0"); Serial3.print(h.ss);
+    }
 }
 
 // ISR PCA9555
@@ -327,41 +405,6 @@ ISR(INT1_vect){
 	}
 }
 
-/*byte getPort0() {
-
-}*/
-
-void test_LCD() {
-	// Prueba del la pantalla LCD
-	// habilitar canal TX3/RX3, canal de comunicaciones serie con la pantalla LCD (MILFORD 4x20 BKP)
-	Serial3.begin(9600); 		//canal 3, 9600 baudios, 8 bits, no parity, 1 stop bit
-											
-	Serial3.write(0xFE); 
-	Serial3.write(0x01); 		//Clear Screen
-	delay(100);
-  
-	Serial3.write(0xFE); 
-	Serial3.write(0x00); 		// Cursor Home
-	delay(100);                       // posicionarse en línea 1
-	Serial3.write("L1: 123 Hola a todos"); 
-	delay(1000); // linea 1
-  
-	Serial3.write(0xFE); 
-	Serial3.write(0xC0); 		// posicionarse en linea 2
-	Serial3.write("L2: 456 Hola a todas"); 
-	delay(1000);  					// linea 2
-  
-	Serial3.write(0xFE); 
-	Serial3.write(0x94); 		// posicionarse en linea 3
-	Serial3.write("L3: 01234567890123456"); 
-	delay(1000);  					// linea 3
-  
-	Serial3.write(0xFE); 
-	Serial3.write(0xD4); 		// posicionarse en linea 4
-	Serial3.write("L4: abcdefghijklmnop"); 
-	delay(1000);  					// linea 4	
-}
-
 void showMenu() {
 	Serial.println("\n--- MENU DE CONFIGURACIÓN DEL PROGRAMADOR DE RIEGO ---");
 	Serial.println("1. Ajustar hora");
@@ -371,15 +414,35 @@ void showMenu() {
 }
 
 void getDataOption3() {
-	//Serial.println("\n");
-	day = readInt("Dia [1-7]: ");
-	line = readInt("Linea de riego [0-1]: ");
-	status = readInt("Estado [0-2]: ");
-	startHour = readInt("Hora de inicio [0-23]: ");
-	startMinutes = readInt("Minutos de inicio [0-59]: ");
-	startSeconds = readInt("Segundos de inicio [0-59]: ");
-	durationMinutes = readInt("Tiempo minutos [0-59]: ");
-	durationSeconds = readInt("Tiempo segundos [0-59]: ");
+	// Leer datos en terminal
+    Serial.println(F("\nConfiguracion Riego:"));
+    day = readInt("Dia [1-7]: ");
+    line = readInt("Linea de riego [0-1]: ");
+    status = readInt("Estado [0:OFF, 1:ON, 2:AUTO]: ");
+    
+    // Guardar en la estructura
+    // El array LR es LR[8][2]. Usamos day tal cual (1-7).
+    if(day >= 1 && day <= 7 && line >= 0 && line <= 1) {
+        LR[day][line].estado = status;
+        
+		// Solo pedir horas si es modo AUTO
+        if (status == 2) {
+            startHour = readInt("Hora inicio [0-23]: ");
+            startMinutes = readInt("Minutos inicio [0-59]: ");
+            startSeconds = readInt("Segundos inicio [0-59]: ");
+            durationMinutes = readInt("Duracion minutos: ");
+            durationSeconds = readInt("Duracion segundos: ");
+            
+            LR[day][line].hi.hh = startHour;
+            LR[day][line].hi.mm = startMinutes;
+            LR[day][line].hi.ss = startSeconds;
+            LR[day][line].T.mm = durationMinutes;
+            LR[day][line].T.ss = durationSeconds;
+        }
+        Serial.println("Datos guardados.");
+    } else {
+        Serial.println("Error: Dia o Linea incorrectos.");
+    }
 }
 
 // Leer entero introducido
@@ -475,9 +538,19 @@ void loop() {
 
         //MODO PROGRAMACIÓN
         case 1:
-            // menú por Puerto Serie (Virtual Terminal)
-            // Serial.println("1. Ajustar Hora...");
-            // Serial.println("3. Configurar Riego...");
+            if (flag_mostrar_menu) {
+                showMenu();
+                flag_mostrar_menu = false;
+                // Limpiar buffer serie de basura anterior
+                while(Serial.available() > 0) Serial.read();
+            }
+
+            if (Serial.available() > 0) {
+                int op = readInt("");
+                if (op == 3) getDataOption3();
+                // Volver a mostrar menú al terminar operación
+                flag_mostrar_menu = true; 
+            }
             break;
 
         //MODO VER
@@ -487,9 +560,41 @@ void loop() {
 
         //MODO AUTO
         case 3:
-            // Comparar hora actual RTC con LR[dia][linea].hi
-            // Si coincide -> estado_valvulas = ON
-            // Si pasa el tiempo de duración -> estado_valvulas = OFF
+            // Obtener tiempo actual
+            byte* t = getRTC_DateTime();
+            // Convertir hora actual a segundos totales del día para facilitar comparación
+            long segundosActuales = (long)t[2]*3600 + (long)t[1]*60 + (long)t[0];
+            int diaHoy = t[3]; // 1-7
+
+            byte nuevoEstadoValvulas = 0;
+
+            // Comprobar Línea 0 y Línea 1
+            for (int i=0; i<2; i++) {
+                int estadoConf = LR[diaHoy][i].estado;
+                
+                if (estadoConf == 1) { 
+                    // Si está forzado a ON todo el día
+                    nuevoEstadoValvulas |= (1 << i); 
+                } else if (estadoConf == 2) {
+                    // Modo programado por hora
+                    long inicioSeg = (long)LR[diaHoy][i].hi.hh*3600 + 
+                                    (long)LR[diaHoy][i].hi.mm*60 + 
+                                    (long)LR[diaHoy][i].hi.ss;
+
+                    long duracionSeg = (long)LR[diaHoy][i].T.mm*60 + 
+                                       (long)LR[diaHoy][i].T.ss;
+
+                    long finSeg = inicioSeg + duracionSeg;
+
+                    // Comprobar si estamos dentro del intervalo
+                    if (segundosActuales >= inicioSeg && segundosActuales < finSeg) {
+                        nuevoEstadoValvulas |= (1 << i); // Activar bit i
+                    }
+                }
+            }
+            
+            // Actuar en hardware
+            estado_valvulas = nuevoEstadoValvulas;
             setPCA_Output(estado_valvulas);
             break;
     }
