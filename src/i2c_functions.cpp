@@ -221,37 +221,43 @@ void setPCA_Output(byte valor) {
     i2c_stop();
 }
 
-//RTC DS3232
+// Definición de variables RTC
+volatile int current_sec = 0;
+volatile int current_min = 0;
+volatile int current_hour = 0;
+volatile int current_day = 1;
 
-// Conversión de Decimal a BCD
-byte decToBcd(byte val) {
-  return ((val / 10 * 16) + (val % 10));
-}
-
-// Conversión de BCD a Decimal
+// Función auxiliar para convertir BCD a Decimal
 byte bcdToDec(byte val) {
-  return ((val / 16 * 10) + (val % 16));
+  return ( (val/16*10) + (val%16) );
 }
 
-// Configurar hora del RTC
-void setRTC_Time(byte second, byte minute, byte hour, byte dayOfWeek, byte dayOfMonth, byte month, byte year) {
+// Función para leer la hora del RTC DS3232
+void readRTC() {
     i2c_start();
-    i2c_write_byte(D_DS3232); 		// Dirección Escritura (0xD0)
-    i2c_rbit();
-    i2c_write_byte(0x00);     		// Puntero al registro 0 (Segundos)
-    i2c_rbit();
+    i2c_write_byte(D_DS3232);       // Dirección de escritura (0xD0)
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    i2c_write_byte(0x00);           // Puntero a registro 0 (Segundos)
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
     
-    i2c_write_byte(decToBcd(second)); i2c_rbit();
-    i2c_write_byte(decToBcd(minute)); i2c_rbit();
-    i2c_write_byte(decToBcd(hour));   i2c_rbit();
-    i2c_write_byte(decToBcd(dayOfWeek)); i2c_rbit();
-    i2c_write_byte(decToBcd(dayOfMonth)); i2c_rbit();
-    i2c_write_byte(decToBcd(month)); i2c_rbit();
-    i2c_write_byte(decToBcd(year));  i2c_rbit();
+    i2c_start();                    // Restart
+    i2c_write_byte(D_DS3232 | 1);   // Dirección de lectura (0xD1)
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    
+    // Leer datos
+    current_sec = bcdToDec(i2c_read_byte());
+    i2c_w0(); // ACK
+    current_min = bcdToDec(i2c_read_byte());
+    i2c_w0(); // ACK
+    current_hour = bcdToDec(i2c_read_byte());
+    i2c_w0(); // ACK
+    current_day = bcdToDec(i2c_read_byte());
+    i2c_w1(); // NACK (último dato)
     
     i2c_stop();
 }
 
+<<<<<<< HEAD
 // Leer datos del RTC (Devuelve un array con los datos)
 // Índices: 0:seg, 1:min, 2:hour, 3:dayWeek, 4:dayMonth, 5:month, 6:year
 byte* getRTC_DateTime() {
@@ -277,4 +283,47 @@ byte* getRTC_DateTime() {
     
     i2c_stop();
     return rtc_data;
+=======
+// Conversión Decimal a BCD
+byte decToBcd(byte val) {
+  return( (val/10*16) + (val%10) );
+}
+
+// Configurar Hora
+void setTimeRTC(int h, int m, int s) {
+    i2c_start();
+    i2c_write_byte(D_DS3232);       
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    i2c_write_byte(0x00);           // Puntero a registro 0 (Segundos)
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    
+    i2c_write_byte(decToBcd(s));    // 00: Segundos
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    i2c_write_byte(decToBcd(m));    // 01: Minutos
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    i2c_write_byte(decToBcd(h));    // 02: Horas
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    
+    i2c_stop();
+}
+
+// Configurar Fecha
+void setDateRTC(int d, int m, int y, int dayOfWeek) {
+    i2c_start();
+    i2c_write_byte(D_DS3232);       
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    i2c_write_byte(0x03);           // Puntero a registro 3 (Día Semana)
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    
+    i2c_write_byte(decToBcd(dayOfWeek)); // 03: Día semana (1-7)
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    i2c_write_byte(decToBcd(d));         // 04: Día mes
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    i2c_write_byte(decToBcd(m));         // 05: Mes
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    i2c_write_byte(decToBcd(y));         // 06: Año (últimos 2 dígitos)
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    
+    i2c_stop();
+>>>>>>> fix-branch
 }

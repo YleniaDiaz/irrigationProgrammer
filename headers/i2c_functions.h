@@ -34,7 +34,16 @@ void initPCA();
 byte getPCA_Input();
 void setPCA_Output(byte valor);
 
-byte decToBcd(byte val);
+// Variables globales del RTC (extern para ser accesibles desde main)
+extern volatile int current_sec;
+extern volatile int current_min;
+extern volatile int current_hour;
+extern volatile int current_day;
+
+// Funciones auxiliares RTC
+// Funciones auxiliares RTC
 byte bcdToDec(byte val);
-void setRTC_Time(byte second, byte minute, byte hour, byte dayOfWeek, byte dayOfMonth, byte month, byte year);
-byte* getRTC_DateTime();
+byte decToBcd(byte val);
+void readRTC();
+void setTimeRTC(int h, int m, int s);
+void setDateRTC(int d, int m, int y, int dayOfWeek);
