@@ -277,6 +277,7 @@ ISR(PCINT0_vect) {
 	
     Serial.write(12);			// Limpiar Terminal Virtual al cambiar de modo
 	menu_mostrado = false; 		// Forzar pintar menú
+	view_day = current_day; 	// Al cambiar de modo volvemos al de hoy
 	
 	// Si salimos de Manual, apagar válvulas por seguridad
     if (modo_priego != MAN) {
@@ -566,9 +567,6 @@ void printTwoDigits(int number) {
 void loop() {
 	readRTC(); 		// Leer la hora
 
-	// Que día se ve en pantalla
-    if (modo_priego != VER) view_day = current_day;
-
 	// Máquina de Estados Principal 
     switch(modo_priego) {
         //MODO MANUAL
@@ -621,7 +619,27 @@ void loop() {
 
         //MODO VER
         case 2:
-            // visualización la maneja el Timer1 en el LCD
+            if (flag_botonera) {
+                flag_botonera = false;
+                byte botones = getPCA_Input(); // Leer estado real (0 = pulsado)
+
+                // Botón LEFT (Bit 0): Retroceder día
+                if (!(botones & 0x01)) { 
+                    view_day--;
+                    if (view_day < 1) view_day = 7; // Vuelta al Domingo
+                    Serial.print("Viendo Dia: "); Serial.println(view_day);
+                }
+
+                // Botón RIGHT (Bit 3): Avanzar día
+                if (!(botones & 0x08)) { 
+                    view_day++;
+                    if (view_day > 7) view_day = 1; // Vuelta al Lunes
+                    Serial.print("Viendo Dia: "); Serial.println(view_day);
+                }
+                
+                // Nota: No gestionamos ON/OFF aquí porque en modo VER 
+                // solo visualizamos, no actuamos sobre las válvulas manualmente.
+            }
             break;
 
         //MODO AUTO
