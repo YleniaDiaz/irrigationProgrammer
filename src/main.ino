@@ -144,7 +144,7 @@ void setup() {
 	pinMode(MODO_VER, INPUT_PULLUP);									// VER  PCINT1
 	pinMode(MODO_AUTOMATICO, INPUT_PULLUP);				// AUTO   PCINT0
 
-	// --- CORRECCIÓN 1: Leer estado inicial del mando ---
+	// Leer estado inicial del mando
     if (digitalRead(MODO_MANUAL) == LOW) modo_priego = MAN;
     else if (digitalRead(MODO_PROGRAMACION) == LOW) modo_priego = PROG;
     else if (digitalRead(MODO_VER) == LOW) modo_priego = VER;
@@ -163,8 +163,8 @@ void setup() {
 
 	/// EXPANSOR PCA9555
 	initPCA();
-	// --- CORRECCIÓN 2: Asegurar válvulas apagadas al inicio ---
-    setPCA_Output(0);
+
+    setPCA_Output(0);	// válvulas apagadas al inicio
 
 	// inicialización estructura de datos (cualquier cosa o leer de EEPROM)
 	/*
@@ -257,10 +257,22 @@ ISR(TIMER3_COMPC_vect){
 //  ISR del switch rotatorio: PCINT0-1-2-3, pines: 53-52-51-50, Modos: AUTO-VER-PROG-MANUAL
 // PORTB[7:0] --> Pines: 13-12-11-10-50-51-52-53 (X-X-X-X-MANUAL-PROG-VER-AUTO)
 ISR(PCINT0_vect) {
-	if (digitalRead(MODO_MANUAL) == LOW) { Serial.println("MODO MANUAL"); modo_priego = MAN; }
-	if (digitalRead(MODO_PROGRAMACION) == LOW) { Serial.println("MODO PROG"); modo_priego = PROG; }
-	if (digitalRead(MODO_VER) == LOW) { Serial.println("MODO VER"); modo_priego = VER; }
-	if (digitalRead(MODO_AUTOMATICO) == LOW) { Serial.println("MODO AUTO"); modo_priego = AUTO; }
+	if (digitalRead(MODO_MANUAL) == LOW) { 
+		Serial.println("MODO MANUAL");
+		modo_priego = MAN;
+	}
+	if (digitalRead(MODO_PROGRAMACION) == LOW) { 
+		Serial.println("MODO PROG");
+		modo_priego = PROG;
+	}
+	if (digitalRead(MODO_VER) == LOW) { 
+		Serial.println("MODO VER");
+		modo_priego = VER;
+	}
+	if (digitalRead(MODO_AUTOMATICO) == LOW) { 
+		Serial.println("MODO AUTO");
+		modo_priego = AUTO;
+	}
 	
 	// Si salimos de Manual, apagar válvulas por seguridad
     if (modo_priego != MAN) {
@@ -293,43 +305,53 @@ ISR(PCINT0_vect) {
 
 // INTERRUPCION PANTALLA
 ISR(TIMER1_OVF_vect) {
-	// Refresco de LCD
-    Serial3.write(0xFE); 
-	Serial3.write(0x80); // Linea 1
+	// Refresco de textos fijos y estados
     
-    if (modo_priego == 0) Serial3.print("MODO: MANUAL   ");
-    else if (modo_priego == 1) Serial3.print("MODO: PROG     ");
-    else if (modo_priego == 2) Serial3.print("MODO: VER      ");
-    else if (modo_priego == 3) Serial3.print("MODO: AUTO     ");
+    // Linea 1: Modo
+    Serial3.write(0xFE); 
+    Serial3.write(0x80); 	// Posicionar inicio L1
+    
+    if (modo_priego == MAN) Serial3.print("MODO: MANUAL   ");
+    else if (modo_priego == PROG) Serial3.print("MODO: PROG     ");
+    else if (modo_priego == VER) Serial3.print("MODO: VER      ");
+    else if (modo_priego == AUTO) Serial3.print("MODO: AUTO     ");
 
-	// Mostrar estado válvulas en Linea 3 (R0) y Linea 4 (R1)
-    // R0 (Línea 3 del LCD)
-    Serial3.write(0xFE); Serial3.write(0x94);
+    // Linea 3: R0 (Estado Válvula 0)
+    Serial3.write(0xFE); 
+    Serial3.write(0x94); 	// Posicionar inicio L3 (Dirección 148)
     Serial3.print("R0: ");
     if (estado_valvulas & 1) Serial3.print("ON "); else Serial3.print("OFF");
     
-    // R1 (Línea 4 del LCD)
-    Serial3.write(0xFE); Serial3.write(0xD4);
+    // Linea 4: R1 (Estado Válvula 1)
+    Serial3.write(0xFE); 
+    Serial3.write(0xD4); 	// Posicionar inicio L4 (Dirección 212)
     Serial3.print("R1: ");
     if (estado_valvulas & 2) Serial3.print("ON "); else Serial3.print("OFF");
 
-    // --- CORRECCIÓN 3: Parpadeo del cursor en MODO MANUAL ---
+    // Blinking en modo Manual
     if (modo_priego == MAN) {
-        Serial3.write(0xFE); Serial3.write(0x4B); // Cursor Blink ON
+        // Posicionar cursor donde queremos parpadeo        
+        Serial3.write(0xFE);
         if (linea_seleccionada == 0) {
-             Serial3.write(0xFE); Serial3.write(0x94 + 3); // Posicionar en R0 (Linea 3)
+            Serial3.write(0x94 + 4);	// L3 (0x94) + desplazamiento 4
         } else {
-             Serial3.write(0xFE); Serial3.write(0xD4 + 3); // Posicionar en R1 (Linea 4)
+			Serial3.write(0xD4 + 4); 	// L4 (0xD4) + desplazamiento 4
         }
+        
+        // Activar blinking (Comando 13 Milford)
+        Serial3.write(0xFE);
+        Serial3.write(0x0D);
+        
     } else {
-        Serial3.write(0xFE); Serial3.write(0x4C); // Cursor Blink OFF
+        //Apagar cursor en otros modos (Comando 12 Milford)
+        Serial3.write(0xFE);
+        Serial3.write(0x0C);
     }
 }
 
 // ISR PCA9555
 ISR(INT1_vect){
-	// --- CORRECCIÓN 4: Solo levantar bandera ---
-    // No hacemos I2C aquí dentro para evitar bloqueos
+    // No I2C aquí para evitar bloqueos
     flag_botonera = true;
 }
 
@@ -431,25 +453,22 @@ void loop() {
             if (flag_botonera) {
                 flag_botonera = false;
                 
-                // Leemos el estado real de los botones por I2C
-                byte botones = getPCA_Input(); 
-                // Botones son Activos a Nivel BAJO (0 = pulsado)
+                byte botones = getPCA_Input(); 		// Leer estado botones por I2C
                 // Bit 0: LEFT, Bit 1: OFF, Bit 2: ON, Bit 3: RIGHT
-
-                if (!(botones & 0x01)) { // LEFT pulsado
-                    linea_seleccionada = 0; // Seleccionar R0
+                if (!(botones & 0x01)) { 		// LEFT pulsado
+                    linea_seleccionada = 0; 	// Seleccionar R0
                     Serial.println("Select R0");
                 }
-                if (!(botones & 0x08)) { // RIGHT pulsado
-                    linea_seleccionada = 1; // Seleccionar R1
+                if (!(botones & 0x08)) { 		// RIGHT pulsado
+                    linea_seleccionada = 1; 	// Seleccionar R1
                     Serial.println("Select R1");
                 }
                 
-                if (!(botones & 0x04)) { // ON pulsado
+                if (!(botones & 0x04)) { 		// ON pulsado
                     Serial.println("Válvula ON");
                     set_valvula(linea_seleccionada, 1);
                 }
-                if (!(botones & 0x02)) { // OFF pulsado
+                if (!(botones & 0x02)) { 		// OFF pulsado
                     Serial.println("Válvula OFF");
                     set_valvula(linea_seleccionada, 0);
                 }
