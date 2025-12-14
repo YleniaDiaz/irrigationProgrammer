@@ -35,20 +35,31 @@
 
 // Definición de las teclas del nuevo teclado
 char teclado_map[][3]={ {'1','2','3'},
-											{'4','5','6'},
-											{'7','8','9'},
-											{'*','0','#'}};
-String buffer = "";
+						{'4','5','6'},
+						{'7','8','9'},
+						{'*','0','#'}};
 String dia[ ] = { "", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN" }; 	// day 1-7
 String mes[ ]={ "", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
 
+int day;
+int line;
+int status;
+int startHour;
+int startMinutes;
+int startSeconds;
+int durationMinutes;
+int durationSeconds;
+
 // Códigos de 7 segmentos de los caracteres hexadecimales: 0-F
-int tabla7seg [ ] = { 63, 06, 91, 79, 102, 109, 125, 39, 127, 103, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71, 0xFF }; // 0,1,2... E,F, todos encendidos
+int tabla_7seg [ ] = { 63, 06, 91, 79, 102, 109, 125, 39, 127, 103, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71, 0xFF }; // 0,1,2... E,F, todos encendidos
+int negativeValue =  64;
 
 // 	PROGRAMADOR DE RIEGO
 String smodo_riego[]={"MAN ", "PROG", "VER ", "AUTO"};
-int modo_priego = 0;	// MAN modo de funcionamiento del programador de riego: 0-3
-enum modo_priego {MAN=0, PROG, VER, AUTO};
+volatile int modo_priego = 0;		// 0:MAN, 1:PROG, 2:VER, 3:AUTO
+volatile bool flag_update_lcd = false;
+volatile bool flag_botonera = false;
+enum modo_priego { MAN=0, PROG, VER, AUTO };
 
 // pulsadores o botones del programador de riego
 volatile boolean p_left = true;
@@ -56,11 +67,34 @@ volatile boolean p_off = true;
 volatile boolean p_on = true;
 volatile boolean p_right = true;
 
+// Estado de válvulas (Bit 0: LR0, Bit 1: LR1)
+byte estado_valvulas = 0;
+
 // Estructura de datos para la programación semanal del riego
 // LR[8][2] para poder usar índices 1-7 directamente (coincidiendo con RTC dayOfWeek)
 // índice 0 no se usa para evitar restar (día - 1).
 // LR [Día] [Línea] -> Día 1..7, Línea 0..1
 linea_riego LR[8] [2];  		// Array de 7 días (de 1 a 8) y 2 líneas -> se puede ampliar para poner sesiones de riego al día LR[8] [2] [3]
+
+// Variables turnomatic
+volatile int count = 0;
+volatile int digit = 0;
+int increment = 1; 
+String buffer = "";
+int displayMode = 1;
+
+// modo domótica: variables
+int servo = 0;			// hasta tres servomotores: 0,1 y 2
+int angulo[ ] = { 0, 0, 0 };		// angulo de cada motor --> angulo[servomotor]
+const int anguloIncrement = 5;
+const int anguloMax = 90;
+const int anguloMin = -90;
+
+// Definición de funciones
+void teclado(int col);
+void setBuffer(int row, int col);
+void readLastKeyboardRow(int col);
+int readInt (String prompt);
 
 void setup() {
 	// CANALES SERIE
@@ -74,7 +108,8 @@ void setup() {
 	// canal tx3/rx3 (pantalla LCD)
 	Serial3.begin(9600); //canal 3, 9600 baudios,8 bits, no parity, 1 stop bit
 	while(!Serial3);
-	Serial3.write(0xFE); Serial3.write(0x01); //Clear Screen
+	Serial3.write(0xFE); 
+	Serial3.write(0x01); //Clear Screen
 	delay(150);
 
 	// puertos de E/S del turnomatic
@@ -136,7 +171,7 @@ void setup() {
 	*/
 	// establecer día de la semana y hora o dejar el que toma por defecto
 	
-	test_LCD();
+	//test_LCD();
 
 	// deshabilitar interrupciones
 	cli();
@@ -216,7 +251,10 @@ ISR(PCINT0_vect) {
 	if (digitalRead(MODO_PROGRAMACION) == LOW) Serial.println("MODO PROGAMACION");
 	if (digitalRead(MODO_VER) == LOW) Serial.println("MODO VER");
 	if (digitalRead(MODO_AUTOMATICO) == LOW) Serial.println("MODO AUTOMATICO");
-	
+
+	// Si salimos de Manual, apagar válvulas
+    if (modo_priego != 0) estado_valvulas = 0;
+
 	/*int val = PINB & 0x0F;
 	// val = 0000 0111 -> MODO MAN
 	// val = 0000 1011 -> MODO PROG
@@ -245,6 +283,20 @@ ISR(TIMER1_OVF_vect) {
 	// setCursor(linea, columna);
 	// Hay que tener en cuenta poner 0 cuando la hora/minutos/segundos sean menor que 10
 	// Serial.print("D"+String(getDay()) + "         " + String(getHour()) + ":"  + String(getMInutes()) + ":" + String(getSeconds()) + "        " + "MODO");
+
+    // Ejemplo
+    Serial3.write(0xFE); 
+	Serial3.write(0x80); // Linea 1
+    
+    if (modo_priego == 0) Serial3.print("MODO: MANUAL   ");
+    else if (modo_priego == 1) Serial3.print("MODO: PROG     ");
+    else if (modo_priego == 3) Serial3.print("MODO: AUTO     ");
+    
+    // Mostrar estado válvulas en Linea 3
+    Serial3.write(0xFE); 
+	Serial3.write(0x94);
+    Serial3.print("V0: ");
+    if (estado_valvulas & 1) Serial3.print("ON "); else Serial3.print("OFF");
 }
 
 // ISR PCA9555
@@ -275,9 +327,9 @@ ISR(INT1_vect){
 	}
 }
 
-byte getPort0() {
+/*byte getPort0() {
 
-}
+}*/
 
 void test_LCD() {
 	// Prueba del la pantalla LCD
@@ -330,6 +382,33 @@ void getDataOption3() {
 	durationSeconds = readInt("Tiempo segundos [0-59]: ");
 }
 
+// Leer entero introducido
+int readInt (String prompt) {
+	String inputString = ""; 
+	bool inputDone = false;
+  
+	  Serial.print(prompt);		// imprimir mensaje 
+
+	  while (!inputDone) {
+		if (Serial.available() > 0) {
+		  char c = Serial.read();
+		  if (isDigit(c) || (c == '-' && inputString.length() == 0)) {	 // Comprobar si es dígito o signo menos (solo al principio)
+			inputString += c;
+			Serial.print(c); 		// imprimir carácter introducido 
+		  } else if ((c == '\b' || c == 127) && inputString.length() > 0) {  	// Comprobar si es backspace (ASCII 8 o 127)
+			inputString.remove(inputString.length() - 1); 	// Borrar último carácter
+			Serial.print("\b \b"); 		// mover cursor atrás
+		  } else if (c == '\r') {  	// Comprobar enter
+			inputDone = true;
+			Serial.println();
+		  }
+		}
+		delay(10); 
+	}
+  
+	return inputString.toInt();	 // string a entero
+}
+
 // Control de válvulas de riego: valv0, valv1
 void set_valvula(int valvula, int estado) {
 
@@ -372,11 +451,46 @@ void readLastKeyboardRow(int col) {
 }
 
 void loop() {
-	// MILFORD LCD on/off
-	Serial3.write(0xFE); 
-	Serial3.write(0x08); // Display off
-	delay(500);
-	Serial3.write(0xFE); 
-	Serial3.write(0x0C); // Display on
-	delay(500);
+	// Máquina de Estados Principal 
+    switch(modo_priego) {
+        //MODO MANUAL
+        case 0: 
+            if (flag_botonera) {
+                flag_botonera = false;
+                byte botones = getPCA_Input(); // Leer estado (Activo bajo)
+
+                // Botón ON (Bit 2) enciende, OFF (Bit 1) apaga
+                // Depende de qué línea esté seleccionada.
+                // Si pulsa ON -> Abre Válvula 0. Si pulsa OFF -> Cierra V0.
+
+                if (!(botones & 0x04)) { // Botón ON presionado
+                    estado_valvulas |= 1; // Encender LR0
+                }
+                if (!(botones & 0x02)) { // Botón OFF presionado
+                    estado_valvulas &= ~1; // Apagar LR0
+                }
+                setPCA_Output(estado_valvulas);
+            }
+            break;
+
+        //MODO PROGRAMACIÓN
+        case 1:
+            // menú por Puerto Serie (Virtual Terminal)
+            // Serial.println("1. Ajustar Hora...");
+            // Serial.println("3. Configurar Riego...");
+            break;
+
+        //MODO VER
+        case 2:
+            // visualización la maneja el Timer1 en el LCD
+            break;
+
+        //MODO AUTO
+        case 3:
+            // Comparar hora actual RTC con LR[dia][linea].hi
+            // Si coincide -> estado_valvulas = ON
+            // Si pasa el tiempo de duración -> estado_valvulas = OFF
+            setPCA_Output(estado_valvulas);
+            break;
+    }
 }

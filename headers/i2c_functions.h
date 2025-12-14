@@ -31,3 +31,5 @@ void write_in_memory (int address, byte data);
 byte randomRead(int address);
 
 void initPCA();
+byte getPCA_Input();
+void setPCA_Output(byte valor);

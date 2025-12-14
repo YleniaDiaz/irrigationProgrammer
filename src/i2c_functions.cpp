@@ -40,8 +40,8 @@ void i2c_stop() {
 
 void i2c_free(){
 	// Liberar el bus. Si sda fuese 0 entonces habria un stop?
-  digitalWrite(ESC_SCL, HIGH); 			// soltamos scl
-  digitalWrite(ESC_SDA, HIGH); 			// soltamos sda
+  	digitalWrite(ESC_SCL, HIGH); 			// soltamos scl
+  	digitalWrite(ESC_SDA, HIGH); 			// soltamos sda
 }
 
 void i2c_w1(){
@@ -125,6 +125,21 @@ byte randomRead(int address) {
 		return data;
 }
 
+void waitWriteComplete() {
+	// La escritura puede tardar, durante la espera la memoria responderá NO ACK
+	// entonces hacemos polling hasta que responda ACK
+	byte_write_retry:
+		i2c_start();
+		i2c_write_byte(ADDR_WRITE); // dirección de escritura
+		if (i2c_rbit() != 0) {
+			i2c_stop();
+			delay(1); 	// esperar antes de reintentar
+			goto byte_write_retry;
+		}
+
+	i2c_stop();		// hubo ACK
+}
+
 void pageWrite(int startAddress, byte data, int numBytes) {
 	int bytesWritten = 0;
 	
@@ -167,9 +182,41 @@ void initPCA() {
 		if (i2c_rbit() != 0) goto pca_init_retry;
 		i2c_write_byte(0x06);			// Escribir en registro de Configuración 0 (reg 6)
 		if (i2c_rbit() != 0) goto pca_init_retry;
-		i2c_write_byte(0x00);			// Escribir 0x00 para P0 (todo salidas)
+		//i2c_write_byte(0x00);			// Escribir 0x00 para P0 (todo salidas)
+		i2c_write_byte(0xFF);      		// 0xFF = Todo Entradas (Botones)
 		if (i2c_rbit() != 0) goto pca_init_retry;
 		i2c_write_byte(0x00);			// Escribir 0x00 para P1 (todo salidas)
 		if (i2c_rbit() != 0) goto pca_init_retry;
 		i2c_stop();
+}
+
+// Lee el estado de los botones (Puerto 0)
+byte getPCA_Input() {
+	byte data = 0;
+    i2c_start();
+    i2c_write_byte(D_PCA9555); 			// Escritura
+    i2c_rbit();
+    i2c_write_byte(0x00);      			// Puntero a Input Port 0
+    i2c_rbit();
+    
+    i2c_start(); 						// Restart
+    i2c_write_byte(D_PCA9555 | 1); 		// Lectura (0x41)
+    i2c_rbit();
+    
+    data = i2c_read_byte();
+    i2c_w1(); 							// NACK (fin de lectura)
+    i2c_stop();
+    return data;
+}
+
+// Escribe en las válvulas (Puerto 1)
+void setPCA_Output(byte valor) {
+    i2c_start();
+    i2c_write_byte(D_PCA9555);
+    i2c_rbit();
+    i2c_write_byte(0x03);      // Puntero a Output Port 1
+    i2c_rbit();
+    i2c_write_byte(valor);     // Escribir estado válvulas (bit 0 y 1)
+    i2c_rbit();
+    i2c_stop();
 }
