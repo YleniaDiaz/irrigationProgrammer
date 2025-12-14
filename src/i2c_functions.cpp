@@ -256,3 +256,46 @@ void readRTC() {
     
     i2c_stop();
 }
+
+// Conversión Decimal a BCD
+byte decToBcd(byte val) {
+  return( (val/10*16) + (val%10) );
+}
+
+// Configurar Hora
+void setTimeRTC(int h, int m, int s) {
+    i2c_start();
+    i2c_write_byte(D_DS3232);       
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    i2c_write_byte(0x00);           // Puntero a registro 0 (Segundos)
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    
+    i2c_write_byte(decToBcd(s));    // 00: Segundos
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    i2c_write_byte(decToBcd(m));    // 01: Minutos
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    i2c_write_byte(decToBcd(h));    // 02: Horas
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    
+    i2c_stop();
+}
+
+// Configurar Fecha
+void setDateRTC(int d, int m, int y, int dayOfWeek) {
+    i2c_start();
+    i2c_write_byte(D_DS3232);       
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    i2c_write_byte(0x03);           // Puntero a registro 3 (Día Semana)
+    if(i2c_rbit() != 0) { i2c_stop(); return; } 
+    
+    i2c_write_byte(decToBcd(dayOfWeek)); // 03: Día semana (1-7)
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    i2c_write_byte(decToBcd(d));         // 04: Día mes
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    i2c_write_byte(decToBcd(m));         // 05: Mes
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    i2c_write_byte(decToBcd(y));         // 06: Año (últimos 2 dígitos)
+    if(i2c_rbit() != 0) { i2c_stop(); return; }
+    
+    i2c_stop();
+}

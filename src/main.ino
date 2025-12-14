@@ -67,10 +67,8 @@ volatile boolean p_off = true;
 volatile boolean p_on = true;
 volatile boolean p_right = true;
 
-// Estado de válvulas (Bit 0: LR0, Bit 1: LR1)
-byte estado_valvulas = 0;
-// Variable para seleccionar qué linea estamos controlando en manual (0 o 1)
-volatile int linea_seleccionada = 0;
+byte estado_valvulas = 0;				// Estado de válvulas (Bit 0: LR0, Bit 1: LR1)
+volatile int linea_seleccionada = 0;	// seleccionar linea en manual (0 o 1)
 
 // Estructura de datos para la programación semanal del riego
 // LR[8][2] para poder usar índices 1-7 directamente (coincidiendo con RTC dayOfWeek)
@@ -274,6 +272,9 @@ ISR(PCINT0_vect) {
 		Serial.println("MODO AUTO");
 		modo_priego = AUTO;
 	}
+
+	// Limpiar Terminal Virtual al cambiar de modo
+    Serial.write(12);
 	
 	// Si salimos de Manual, apagar válvulas por seguridad
     if (modo_priego != MAN) {
@@ -367,14 +368,6 @@ ISR(INT1_vect){
     flag_botonera = true;
 }
 
-void showMenu() {
-	Serial.println("\n--- MENU DE CONFIGURACIÓN DEL PROGRAMADOR DE RIEGO ---");
-	Serial.println("1. Ajustar hora");
-	Serial.println("2. Ajustar fecha");
-	Serial.println("3. Configurar líneas de riego");
-	Serial.print("Seleccione una opcion: ");
-}
-
 void getDataOption3() {
 	//Serial.println("\n");
 	day = readInt("Dia [1-7]: ");
@@ -387,31 +380,97 @@ void getDataOption3() {
 	durationSeconds = readInt("Tiempo segundos [0-59]: ");
 }
 
-// Leer entero introducido
-int readInt (String prompt) {
-	String inputString = ""; 
-	bool inputDone = false;
-  
-	  Serial.print(prompt);		// imprimir mensaje 
+int readInt(String prompt) {
+    String inputString = "";
+    bool inputDone = false;
+    
+    // Imprimir el mensaje si no está vacío
+    if (prompt != "") Serial.print(prompt);
+    
+    // Limpiar buffer previo
+    while(Serial.available()) Serial.read();
 
-	  while (!inputDone) {
-		if (Serial.available() > 0) {
-		  char c = Serial.read();
-		  if (isDigit(c) || (c == '-' && inputString.length() == 0)) {	 // Comprobar si es dígito o signo menos (solo al principio)
-			inputString += c;
-			Serial.print(c); 		// imprimir carácter introducido 
-		  } else if ((c == '\b' || c == 127) && inputString.length() > 0) {  	// Comprobar si es backspace (ASCII 8 o 127)
-			inputString.remove(inputString.length() - 1); 	// Borrar último carácter
-			Serial.print("\b \b"); 		// mover cursor atrás
-		  } else if (c == '\r') {  	// Comprobar enter
-			inputDone = true;
-			Serial.println();
-		  }
-		}
-		delay(10); 
-	}
-  
-	return inputString.toInt();	 // string a entero
+    while (!inputDone) {
+        // Verificar si salimos del modo PROG mientras esperamos input
+        if (modo_priego != PROG) return -1; 
+
+        if (Serial.available() > 0) {
+            char c = Serial.read();
+            if (isDigit(c)) {
+                inputString += c;
+                Serial.print(c);
+            } else if (c == '\r' || c == '\n') {
+                inputDone = true;
+                Serial.println();
+            }
+        }
+    }
+    return inputString.toInt();
+}
+
+void opcion_ajustar_hora() {
+    Serial.println("\n--- AJUSTAR HORA ---");
+    int h = readInt("Hora (0-23): ");
+    if(h == -1) return; // Salida abortada
+    int m = readInt("Minutos (0-59): ");
+    int s = readInt("Segundos (0-59): ");
+    
+    setTimeRTC(h, m, s);
+    Serial.println(F("Hora actualizada."));
+}
+
+void opcion_ajustar_fecha() {
+    Serial.println("\n--- AJUSTAR FECHA ---");
+    int dw = readInt("Dia Semana (1=Lun ... 7=Dom): ");
+    if(dw == -1) return;
+    int d = readInt("Dia Mes (1-31): ");
+    int m = readInt("Mes (1-12): ");
+    int y = readInt("Anio (0-99): ");
+    
+    setDateRTC(d, m, y, dw);
+    Serial.println("Fecha actualizada.");
+}
+
+void opcion_riego() {
+    Serial.println("\n--- CONFIGURAR RIEGO ---");
+    
+    // Pedir Día y Línea
+    int d = readInt("Dia (1-7): ");
+    if (d < 1 || d > 7) { Serial.println("Dia incorrecto"); return; }
+    
+    int l = readInt("Linea (0-1): ");
+    if (l < 0 || l > 1) { Serial.println("Linea incorrecta"); return; }
+    
+    // 2. Pedir Estado
+    int st = readInt("Estado (0:OFF, 1:ON, 2:PROG): ");
+    if (st < 0 || st > 2) { Serial.println("Estado incorrecto"); return; }
+    
+    // Guardar estado básico
+    LR[d][l].estado = st;
+    
+    // 3. Si es programación (Estado 2), pedir hora y duración
+    if (st == 2) {
+        Serial.println("Configuracion Horaria:");
+        LR[d][l].hi.hh = readInt("Hora inicio (0-23): ");
+        LR[d][l].hi.mm = readInt("Minuto inicio (0-59): ");
+        LR[d][l].hi.ss = readInt("Segundo inicio (0-59): ");
+        
+        LR[d][l].T.mm = readInt("Duracion Minutos: ");
+        LR[d][l].T.ss = readInt("Duracion Segundos: ");
+    }
+    
+    Serial.print("Guardado: Dia "); Serial.print(d);
+    Serial.print(" Linea "); Serial.println(l);
+}
+
+void showMenu() {
+    Serial.write(12); // Clear terminal
+    Serial.println("\n*** MENU PROGRAMADOR DE RIEGO ***");
+    Serial.println("1. Ajustar Hora");
+    Serial.println("2. Ajustar Fecha");
+    Serial.println("3. Configurar Lineas de Riego");
+    Serial.println("---------------------------------");
+	Serial.print("Seleccione opcion: ");
 }
 
 // Control de válvulas de riego: valv0, valv1
@@ -467,6 +526,8 @@ void printTwoDigits(int number) {
 void loop() {
 	readRTC(); 		// Leer la hora
 
+	static bool menu_mostrado = false;
+
 	// Máquina de Estados Principal 
     switch(modo_priego) {
         //MODO MANUAL
@@ -496,11 +557,25 @@ void loop() {
             }
 			break;
 
-        //MODO PROGRAMACIÓN
+		//MODO PROGRAMACIÓN
         case 1:
-            // menú por Puerto Serie (Virtual Terminal)
-            // Serial.println("1. Ajustar Hora...");
-            // Serial.println("3. Configurar Riego...");
+            if (!menu_mostrado) {
+                showMenu();
+                menu_mostrado = true;
+            }
+
+            if (Serial.available() > 0) {
+                int op = readInt("");
+                
+                switch(op) {
+                    case 1: opcion_ajustar_hora(); break;
+                    case 2: opcion_ajustar_fecha(); break;
+                    case 3: opcion_riego(); break;
+                    default: Serial.println("Opcion no valida"); break;
+                }
+                delay(1000); 
+                menu_mostrado = false; 		// volver a pintar menú
+            }
             break;
 
         //MODO VER

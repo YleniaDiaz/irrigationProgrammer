@@ -41,5 +41,9 @@ extern volatile int current_hour;
 extern volatile int current_day;
 
 // Funciones auxiliares RTC
+// Funciones auxiliares RTC
 byte bcdToDec(byte val);
+byte decToBcd(byte val);
 void readRTC();
+void setTimeRTC(int h, int m, int s);
+void setDateRTC(int d, int m, int y, int dayOfWeek);
