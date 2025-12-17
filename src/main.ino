@@ -37,13 +37,13 @@
 //EEPROM 24LC64)
 #define EEPROM_ADDR  0     						// Dirección para saber si ya está configurado
 #define EEPROM_VAL   0x55  						// Valor indicar memoria válida
-#define EEPROM_START_ADDR  10   		// Dirección donde empiezan los datos de riego
+#define EEPROM_START_ADDR  20   		// Dirección donde empiezan los datos de riego
 
 // Definición de las teclas del nuevo teclado
 char teclado_map[][3]={ {'1','2','3'},
-											{'4','5','6'},
-											{'7','8','9'},
-											{'*','0','#'}};
+						{'4','5','6'},
+						{'7','8','9'},
+						{'*','0','#'}};
 String dia[ ] = { "", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN" }; 	// day 1-7
 String mes[ ]= { "", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
 
@@ -188,7 +188,7 @@ ISR(TIMER3_COMPC_vect){
 
     int valor_a_mostrar = 0;
 
-    // 1. ELEGIR QUÉ MOSTRAR
+    // ELEGIR QUÉ MOSTRAR
     if (modo_priego == AUTOPLUS) {
         valor_a_mostrar = autoplus; // AUTO+ -> variable porcentaje
     } else {
@@ -449,6 +449,7 @@ void showMenu() {
     Serial.println("1. Ajustar Hora");
     Serial.println("2. Ajustar Fecha");
     Serial.println("3. Configurar Lineas de Riego");
+    Serial.println("4. Guardar en memoria: fecha, hora y temperatura");
     Serial.println("---------------------------------");
 	Serial.print("Seleccione opcion: ");
 }
@@ -600,6 +601,53 @@ void reset_programacion() {
     guardar_programacion(); // Guardamos los ceros en memoria
 }
 
+void opcion_guardar_log() {
+    Serial.println("\n--- GUARDANDO LOG ---");
+    
+    int temp = getTemperatureDS3232();  // Leer temperatura
+    
+    String logStr = "";
+    if (current_day < 10) logStr += "0";
+    logStr += String(current_day) + "/";
+    
+    i2c_start();
+    i2c_write_byte(D_DS3232); 
+    i2c_rbit();
+    i2c_write_byte(0x04); 
+    i2c_rbit();         // Empieza fecha
+    i2c_start(); 
+    i2c_write_byte(D_DS3232 | 1); 
+    i2c_rbit();
+    
+    int d_mes = bcdToDec(i2c_read_byte()); 
+    i2c_w0();
+    int mes_val = bcdToDec(i2c_read_byte() & 0x1F); 
+    i2c_w0();           // Mask century
+    int anio = bcdToDec(i2c_read_byte()); 
+    i2c_w1();
+    i2c_stop();
+
+    // dd/mm/aa-hh:mm:ss#tt# 
+    logStr = (d_mes < 10 ? "0" : "") + String(d_mes) + "/" +
+             (mes_val < 10 ? "0" : "") + String(mes_val) + "/" +
+             (anio < 10 ? "0" : "") + String(anio) + "-" +
+             (current_hour < 10 ? "0" : "") + String(current_hour) + ":" +
+             (current_min < 10 ? "0" : "") + String(current_min) + ":" +
+             (current_sec < 10 ? "0" : "") + String(current_sec) + "#" +
+             String(temp) + "#";
+             
+    Serial.print("Guardando: "); Serial.println(logStr);
+    
+    // Escribir en EEPROM (Dirección 0)
+    int addr = 0;
+    for (unsigned int i = 0; i < logStr.length(); i++) {
+        write_in_memory(addr + i, logStr.charAt(i));
+        delay(5);       // espera entre escrituras
+    }
+
+    Serial.println("Guardado OK.");
+}
+
 void loop() {
 	readRTC(); 		// Leer hora
 
@@ -649,6 +697,9 @@ void loop() {
                     case 3: 
 						opcion_riego();
 						break;
+                    case 4:
+                        opcion_guardar_log();
+                        break;
                     default:
 						Serial.println("Opcion no valida");
 						break;

@@ -299,3 +299,22 @@ void setDateRTC(int d, int m, int y, int dayOfWeek) {
     
     i2c_stop();
 }
+
+int getTemperatureDS3232() {
+    // Registros 11 (MSB) y 12 (LSB) del DS3232
+    i2c_start();
+    i2c_write_byte(D_DS3232);      // Dir Escritura
+    i2c_rbit();
+    i2c_write_byte(0x11);          // Puntero a MSB Temperatura
+    i2c_rbit();
+    
+    i2c_start();                   // Restart
+    i2c_write_byte(D_DS3232 | 1);  // Dir Lectura
+    i2c_rbit();
+    
+    byte msb = i2c_read_byte();    // Parte entera
+    i2c_w1();                      // NACK (Solo interesa la parte entera para el formato tt)
+    i2c_stop();
+    
+    return (int)msb; 				// Devolvemos la parte entera tt
+}

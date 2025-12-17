@@ -47,3 +47,4 @@ byte decToBcd(byte val);
 void readRTC();
 void setTimeRTC(int h, int m, int s);
 void setDateRTC(int d, int m, int y, int dayOfWeek);
+int getTemperatureDS3232();
