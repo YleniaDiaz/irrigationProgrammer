@@ -492,24 +492,34 @@ void showMenu() {
 
 // Control de válvulas de riego: valv0, valv1
 void set_valvula(int valvula, int estado) {
+    byte ultima_LR2 = 0xFF; 
+    byte estado_LR2_actual = 0;
+
     if (valvula == 0 || valvula == 1) {
+        byte estado_anterior = estado_valvulas;
+        
         if (estado == 1) estado_valvulas |= (1 << valvula);
         else estado_valvulas &= ~(1 << valvula);
-        setPCA_Output(estado_valvulas);
+        
+        // Solo enviamos si ha habido cambio real en los bits
+        if (estado_valvulas != estado_anterior) {
+            setPCA_Output(estado_valvulas);
+        }
     } else if (valvula == 2) {
-        byte estado_LR2 = 0;
-        if (estado == 1) estado_LR2 = 0x80;         // Bit 7 a 1 (1000 0000)
-        else estado_LR2 = 0x00;                     // Bit 7 a 0
+        byte valor_a_enviar = (estado == 1) ? 0x80 : 0x00;      // encendido o apagado
 
-        //Escribir en registro 2
-        i2c_start();
-        i2c_write_byte(D_PCA9555);
-        i2c_rbit();
-        i2c_write_byte(0x02);               // Puntero a Output Port 0 (Registro 2)
-        i2c_rbit();
-        i2c_write_byte(estado_LR2);         // Escribir estado
-        i2c_rbit();
-        i2c_stop();
+        // Solo escrbir en el I2C si el valor es DISTINTO al último enviado
+        if (valor_a_enviar != ultima_LR2) {
+            i2c_start();
+            i2c_write_byte(D_PCA9555);
+            i2c_rbit();
+            i2c_write_byte(0x02);      // Puntero a Output Port 0
+            i2c_rbit();
+            i2c_write_byte(valor_a_enviar); 
+            i2c_rbit();
+            i2c_stop();
+            ultima_LR2 = valor_a_enviar;    // Actualizar memoria del último estado
+        }
     }
 }
 
