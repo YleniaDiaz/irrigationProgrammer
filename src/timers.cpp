@@ -35,7 +35,7 @@ void timer3_init(){
 void timerPCINT0_init() {
 	// Interrupciones Pin Change para Mando Rotatorio (PCINT0..3 están en Puerto B)
     PCICR |= (1 << PCIE0);				// Habilitar grupo PCIE0
-    PCMSK0 |= (1 << PCINT3) | (1 << PCINT2) | (1 << PCINT1) | (1 << PCINT0);			// B00001111 /  Habilitar pines PB3..0 (Arduino 50..53)
+    PCMSK0 |= (1 << PCINT4) | (1 << PCINT3) | (1 << PCINT2) | (1 << PCINT1) | (1 << PCINT0);			// B00001111 /  Habilitar pines PB3..0 (Arduino 50..53)
 
     // INT1 para PCA9555 (Pin 20)
     EICRA &= ~(1 << ISC10);  			// Configurar disparo por FLANCO DE BAJADA (Falling Edge) -> ISC11=1, ISC10=0

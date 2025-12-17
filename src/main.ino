@@ -32,6 +32,7 @@
 #define MODO_PROGRAMACION 51
 #define MODO_VER 52
 #define MODO_AUTOMATICO 53
+#define MODO_AUTOPLUS 10        // Pin 10 (PB4)
 
 //EEPROM 24LC64)
 #define EEPROM_ADDR  0     						// Dirección para saber si ya está configurado
@@ -51,12 +52,13 @@ int tabla_7seg [ ] = { 63, 06, 91, 79, 102, 109, 125, 39, 127, 103, 0x77, 0x7C, 
 int negativeValue =  64;
 
 // 	PROGRAMADOR DE RIEGO
-String smodo_riego[]={"MAN ", "PROG", "VER ", "AUTO"};
+String smodo_riego[]={"MAN ", "PROG", "VER ", "AUTO", "AUTO+" };
 volatile int modo_priego = 0;		// 0:MAN, 1:PROG, 2:VER, 3:AUTO
 volatile bool flag_update_lcd = false;
 volatile bool flag_botonera = false;
 volatile bool menu_mostrado = false;
-enum modo_priego { MAN=0, PROG, VER, AUTO };
+volatile int autoplus = 25;         // Valor inicial 25%
+enum modo_priego { MAN=0, PROG, VER, AUTO, AUTOPLUS };
 
 // pulsadores o botones del programador de riego
 volatile boolean p_left = true;
@@ -142,12 +144,14 @@ void setup() {
 	pinMode(MODO_PROGRAMACION, INPUT_PULLUP);			// PROG  PCINT2
 	pinMode(MODO_VER, INPUT_PULLUP);									// VER  PCINT1
 	pinMode(MODO_AUTOMATICO, INPUT_PULLUP);				// AUTO   PCINT0
+    pinMode(MODO_AUTOPLUS, INPUT_PULLUP);
 
 	// Leer estado inicial del mando
     if (digitalRead(MODO_MANUAL) == LOW) modo_priego = MAN;
     else if (digitalRead(MODO_PROGRAMACION) == LOW) modo_priego = PROG;
     else if (digitalRead(MODO_VER) == LOW) modo_priego = VER;
     else if (digitalRead(MODO_AUTOMATICO) == LOW) modo_priego = AUTO;
+    else if (digitalRead(MODO_AUTOPLUS) == LOW) modo_priego = AUTOPLUS;
 
 	/// EXPANSOR I2C PCA9555
 	// declaración del pin para que interrumpa el PCA9555  ->interrupción INT1 (pin 20)
@@ -181,6 +185,13 @@ void setup() {
 // Visualización entrelazada display-teclado 4x3 (turnomatic)
 ISR(TIMER3_COMPC_vect){
 	PORTL = DOFF;		//bloquea el display
+
+    // Si estamos en modo AUTO+, forzamos visualizar variable autoplus 
+    // Usamos la variable 'count' temporalmente o una lógica paralela.
+    // Si es AUTOPLUS, sobrescribimos lo que se iba a mostrar:
+    
+    int valor_a_mostrar = count; // Por defecto
+    if (modo_priego == AUTOPLUS) valor_a_mostrar = autoplus; // Mostramos porcentaje
 	
 	if (displayMode == 4) { 	// Modo domótica
 		int anguloActual = angulo[servo];
@@ -208,23 +219,23 @@ ISR(TIMER3_COMPC_vect){
 	} else { 	// Modo turnomatic
 		switch (digit) {
 			case 0: 
-				if (displayMode == 1 ||  displayMode == 2) PORTA = tabla_7seg[count%10];  	//Visualización unidades
+				if (displayMode == 1 ||  displayMode == 2) PORTA = tabla_7seg[valor_a_mostrar%10];  	//Visualización unidades
 				else PORTA = 0x00;  // Apagar
 				PORTL  = D4;
 				break;
 			case 1: 
-				if (displayMode == 1  ||  displayMode == 2) PORTA = tabla_7seg[int(count / 10)%10]; 	//Visualización decenas
+				if (displayMode == 1  ||  displayMode == 2) PORTA = tabla_7seg[int(valor_a_mostrar / 10)%10]; 	//Visualización decenas
 				else PORTA = 0x00;	// Apagar
 				PORTL  = D3;
 				break;
 			case 2: 
-				if (displayMode == 1 ) PORTA = tabla_7seg[int(count / 100)%10];	//Visualización centenas
-				else if (displayMode == 3) PORTA = tabla_7seg[count%10];	// visualizar unidades
+				if (displayMode == 1 ) PORTA = tabla_7seg[int(valor_a_mostrar / 100)%10];	//Visualización centenas
+				else if (displayMode == 3) PORTA = tabla_7seg[valor_a_mostrar%10];	// visualizar unidades
 				else PORTA = 0x00;	// Apagar
 				PORTL  = D2;
 				break;
 			case 3:
-				if (displayMode == 3) PORTA = tabla_7seg[int(count / 10)%10]; 	// visualizar decenas
+				if (displayMode == 3) PORTA = tabla_7seg[int(valor_a_mostrar / 10)%10]; 	// visualizar decenas
 				else PORTA = 0x00;	// Apagar
 				PORTL  = D1;
 				break;
@@ -255,6 +266,10 @@ ISR(PCINT0_vect) {
 		Serial.println("MODO AUTO");
 		modo_priego = AUTO;
 	}
+    if (digitalRead(MODO_AUTOPLUS) == LOW) {
+        Serial.println("MODO AUTO+");
+        modo_priego = AUTOPLUS;
+    }
 	
     Serial.write(12);							// Limpiar Terminal Virtual al cambiar de modo
 	menu_mostrado = false; 			// Forzar pintar menú
@@ -265,28 +280,6 @@ ISR(PCINT0_vect) {
         estado_valvulas = 0;
         setPCA_Output(0);
     }
-
-	/*int val = PINB & 0x0F;
-	// val = 0000 0111 -> MODO MAN
-	// val = 0000 1011 -> MODO PROG
-	// val = 0000 1101 -> MODO VER
-	// val = 0000 1110 -> MODO AUTO
-	switch(val) {
-		case 7:				// Modo MAN
-			Serial.println("MODO MANUAL");
-			break;
-		case 11:			// Modo PROG
-			Serial.println("MODO PROGRAMACION");
-			break;
-		case 13:			// Modo VER
-			Serial.println("MODO VER");
-			break;
-		case 14:			// Modo AUTO
-			Serial.println("MODO AUTO");
-			break;
-		default:
-			break;
-	}*/
 }
 
 // INTERRUPCION PANTALLA
@@ -318,20 +311,29 @@ ISR(TIMER1_OVF_vect) {
             } else if (estado_guardado == 1) {
                 Serial3.print("ON                   ");
             } else if (estado_guardado == 2) {
-                // Formato: HH:MM:SS  MM:SS
-                printTwoDigits(LR[display_d][i].hi.hh); Serial3.print(":");
-                printTwoDigits(LR[display_d][i].hi.mm); Serial3.print(":");
-                printTwoDigits(LR[display_d][i].hi.ss); 
-                Serial3.print("  ");
-                printTwoDigits(LR[display_d][i].T.mm); Serial3.print(":");
-                printTwoDigits(LR[display_d][i].T.ss);
+                if (modo_priego == AUTOPLUS) {
+                    //Cálculo: (Duración + Porcentaje) en segundos
+                    long duracion_base = (LR[display_d][i].T.mm * 60L) + LR[display_d][i].T.ss;
+                    long duracion_plus = duracion_base + (duracion_base * autoplus / 100);
+                    
+                    // Visualizar solo segundos con sufijo 's'
+                    Serial3.print(duracion_plus);
+                    Serial3.print("s                 "); // Espacios para limpiar
+                } else {
+                    // Formato: HH:MM:SS  MM:SS
+                    printTwoDigits(LR[display_d][i].hi.hh); Serial3.print(":");
+                    printTwoDigits(LR[display_d][i].hi.mm); Serial3.print(":");
+                    printTwoDigits(LR[display_d][i].hi.ss); 
+                    Serial3.print("  ");
+                    printTwoDigits(LR[display_d][i].T.mm); Serial3.print(":");
+                    printTwoDigits(LR[display_d][i].T.ss);
+                }
             }
-        } 
-        else {
+        } else {
             // SOLO EN MANUAL: Mostrar estado "forzado" de las válvulas
             if (estado_valvulas & (1 << i)) Serial3.print("ON              "); 
             else Serial3.print("OFF             ");
-        }
+        } 
     }
 
     // GESTIÓN DEL CURSOR (Modo Manual)
@@ -512,7 +514,17 @@ void readLastKeyboardRow(int col) {
 		count = buffer.toInt();
 		buffer="";
 		tone(SPEAKER, 1000, 100);
-	} else {
+	} else if (col == 0 && modo_priego == AUTOPLUS) { 
+        // Tecla '*' en modo AUTO+:-> guardar porcentaje
+        int nuevo_val = buffer.toInt();
+        if (nuevo_val >= 0 && nuevo_val <= 100) {
+            autoplus = nuevo_val;
+            Serial.print("Autoplus actualizado: ");
+            Serial.println(autoplus);
+        }
+        buffer="";
+        tone(SPEAKER, 1000, 100);
+    } else {
 		setBuffer(3, col);
 	}
 }
@@ -614,7 +626,6 @@ void reset_programacion() {
 void loop() {
 	readRTC(); 		// Leer hora
 
-	// Máquina de Estados Principal 
     switch(modo_priego) {
         case 0: //MODO MANUAL
             if (flag_botonera) {
@@ -725,6 +736,33 @@ void loop() {
                     } else {
                         set_valvula(i, 0); // APAGAR (Fuera de horario)
                     }
+                }
+            }
+            break;
+
+        case AUTOPLUS:
+            for(int i=0; i<2; i++) {
+                int estado_prog = LR[current_day][i].estado;
+                
+                if (estado_prog == 2) {
+                    long now_sec = toSeconds(current_hour, current_min, current_sec);
+                    long start_sec = toSeconds(LR[current_day][i].hi.hh, LR[current_day][i].hi.mm, LR[current_day][i].hi.ss);
+                    
+                    // CALCULO INCREMENTADO
+                    long duration_base = (LR[current_day][i].T.mm * 60L) + LR[current_day][i].T.ss;
+                    long duration_plus = duration_base + (duration_base * autoplus / 100);
+                    
+                    long end_sec = start_sec + duration_plus;
+
+                    if (duration_plus > 0 && now_sec >= start_sec && now_sec < end_sec) {
+                        set_valvula(i, 1);
+                    } else {
+                        set_valvula(i, 0);
+                    }
+                } else if (estado_prog == 1) {
+                    set_valvula(i, 1);          // ON manual guardado
+                } else {
+                    set_valvula(i, 0);          // OFF
                 }
             }
             break;
