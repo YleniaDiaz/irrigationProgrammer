@@ -75,6 +75,7 @@ volatile int view_day = 1; 								// Controla que día se visualiza en el LCD
 linea_riego LR[8] [3];  		// Array de 7 días (de 1 a 8) y 3 líneas -> se puede ampliar para poner sesiones de riego al día LR[8] [2] [3]
 
 volatile bool mostrar_oculta = false;       // controlar visualización de línea oculta
+volatile bool tecla_hash_pulsada = false;
 
 // Variables turnomatic
 volatile int count = 0;
@@ -192,60 +193,28 @@ void setup() {
 
 // Visualización entrelazada display-teclado 4x3 (turnomatic)
 ISR(TIMER3_COMPC_vect){
-	PORTL = DOFF;		//bloquea el display
-	
-	if (displayMode == 4) { 	// Modo domótica
-		int anguloActual = angulo[servo];
-		int anguloAbs = abs(anguloActual);
-		
-		switch (digit) {
-			case 0: 
-				PORTA = tabla_7seg[anguloAbs%10];  	//Visualización unidades de los grados
-				PORTL  = D4;
-				break;
-			case 1: 
-				PORTA = tabla_7seg[anguloAbs / 10%10]; 	//Visualización decenas de los grados
-				PORTL  = D3;
-				break;
-			case 2: 
-				if (anguloActual < 0) PORTA = negativeValue;	// Visualización - si el angulo es negativo
-				else PORTA = 0x00;	// Apagar
-				PORTL = D2;
-				break;
-			case 3:
-				PORTA = tabla_7seg[servo]; 	// visualizar en millar el servo seleccionado
-				PORTL  = D1;
-				break;
-		}
-	} else { 	// Modo turnomatic
-		switch (digit) {
-			case 0: 
-				if (displayMode == 1 ||  displayMode == 2) PORTA = tabla_7seg[count%10];  	//Visualización unidades
-				else PORTA = 0x00;  // Apagar
-				PORTL  = D4;
-				break;
-			case 1: 
-				if (displayMode == 1  ||  displayMode == 2) PORTA = tabla_7seg[int(count / 10)%10]; 	//Visualización decenas
-				else PORTA = 0x00;	// Apagar
-				PORTL  = D3;
-				break;
-			case 2: 
-				if (displayMode == 1 ) PORTA = tabla_7seg[int(count / 100)%10];	//Visualización centenas
-				else if (displayMode == 3) PORTA = tabla_7seg[count%10];	// visualizar unidades
-				else PORTA = 0x00;	// Apagar
-				PORTL  = D2;
-				break;
-			case 3:
-				if (displayMode == 3) PORTA = tabla_7seg[int(count / 10)%10]; 	// visualizar decenas
-				else PORTA = 0x00;	// Apagar
-				PORTL  = D1;
-				break;
-		}
-		teclado(digit);
-	}
-	
-	if (digit == 0 || digit == 1 || digit == 2) digit++;
-	else digit = 0;
+    PORTA = 0x00;       // Apagar display
+    PORTL = 0xFF;        // Apagar columnas todas primero
+    
+    switch (digit) {
+        case 0: 
+            PORTL = D4; 
+            break;          // Activar col 0
+        case 1: 
+            PORTL = D3; 
+            break;          // Activar col 1
+        case 2: 
+            PORTL = D2;
+            break;          // Activar col 2
+        case 3: 
+            PORTL = D1;
+            break;          // Activar col 3
+    }
+
+    teclado(digit);
+
+    if (digit < 3) digit++;
+    else digit = 0;
 }
 
 //ISR del switch rotatorio: PCINT0-1-2-3, pines: 53-52-51-50, Modos: AUTO-VER-PROG-MANUAL
@@ -547,25 +516,32 @@ void teclado(int col) {
 }
 
 void setBuffer(int row, int col) {
-	buffer = buffer + teclado_map[row][col];
+    char tecla = teclado_map[row][col];
+    
+    // Si la tecla '#' fue pulsada antes
+    if (tecla_hash_pulsada) {
+        if (tecla == '3') {             // #3: Mostrar LR2
+            mostrar_oculta = true;
+            Serial.println("CMD: Mostrar LR2");
+        } else if (tecla == '9') {      // #9: Ocultar LR2 y guardar header
+            mostrar_oculta = false;
+            guardar_header_eeprom();
+            Serial.println("CMD: Ocultar LR2 y Guardar");
+        }
+        
+        tecla_hash_pulsada = false;     // Resetear flag
+    }
 }
 
 void readLastKeyboardRow(int col) {
-	if (col == 2) { 	//col = 2  -> #
-		int command = buffer.toInt();
-
-        if (command == 3) mostrar_oculta = true;        // Visualizar LR2
-        else if (command == 9) {                        // Ocultar LR2 y Guardar cabecera
-            mostrar_oculta = false;
-            guardar_header_eeprom();
-        }
-
-		count = command;
-		buffer="";
-		tone(SPEAKER, 1000, 100);
-	} else {
-		setBuffer(3, col);
-	}
+	// tecla '#' -> col 2 de la última fila
+    if (col == 2) { 
+        // Se ha pulsado '#'
+        tecla_hash_pulsada = true;
+    } else {
+        // Son las teclas '*' (col 0) o '0' (col 1)
+        setBuffer(3, col);
+    }
 }
 
 void printTwoDigits(int number) {
