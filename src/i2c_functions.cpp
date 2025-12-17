@@ -257,33 +257,6 @@ void readRTC() {
     i2c_stop();
 }
 
-<<<<<<< HEAD
-// Leer datos del RTC (Devuelve un array con los datos)
-// Índices: 0:seg, 1:min, 2:hour, 3:dayWeek, 4:dayMonth, 5:month, 6:year
-byte* getRTC_DateTime() {
-    static byte rtc_data[7];
-    
-    i2c_start();
-    i2c_write_byte(D_DS3232); 			// Escritura para poner puntero
-    i2c_rbit();
-    i2c_write_byte(0x00);     			// Registro 0
-    i2c_rbit();
-    
-    i2c_start();              			// Restart
-    i2c_write_byte(D_DS3232 | 1); 		// Lectura (0xD1)
-    i2c_rbit();
-    
-    // Leer 7 bytes
-    for(int i=0; i<6; i++) {
-        rtc_data[i] = bcdToDec(i2c_read_byte());
-        i2c_w0(); 						// ACK (queremos más datos)
-    }
-    rtc_data[6] = bcdToDec(i2c_read_byte());
-    i2c_w1(); 							// NACK (último dato)
-    
-    i2c_stop();
-    return rtc_data;
-=======
 // Conversión Decimal a BCD
 byte decToBcd(byte val) {
   return( (val/10*16) + (val%10) );
@@ -325,5 +298,4 @@ void setDateRTC(int d, int m, int y, int dayOfWeek) {
     if(i2c_rbit() != 0) { i2c_stop(); return; }
     
     i2c_stop();
->>>>>>> fix-branch
 }
