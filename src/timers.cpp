@@ -29,6 +29,8 @@ void timer3_init(){
 	OCR3A = 9999;   // Definir el TOP par a 5ms
 	OCR3C = 9999;  // Interrupción cuando llega al top
 
+	TIMSK3 |= (1 << OCIE3C); // Habilitar interrupción por comparación en canal C
+
 	pinMode(3, 1); 		//el pin 3 es de salida (1)
 }
 

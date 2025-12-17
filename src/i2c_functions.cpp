@@ -182,8 +182,7 @@ void initPCA() {
 		if (i2c_rbit() != 0) goto pca_init_retry;
 		i2c_write_byte(0x06);			// Escribir en registro de Configuración 0 (reg 6)
 		if (i2c_rbit() != 0) goto pca_init_retry;
-		//i2c_write_byte(0x00);			// Escribir 0x00 para P0 (todo salidas)
-		i2c_write_byte(0xFF);      		// 0xFF = Todo Entradas (Botones)
+		i2c_write_byte(0x7F);           // 0x7F (0111 1111) -> Bit 7 Salida (LR2), resto Entradas
 		if (i2c_rbit() != 0) goto pca_init_retry;
 		i2c_write_byte(0x00);			// Escribir 0x00 para P1 (todo salidas)
 		if (i2c_rbit() != 0) goto pca_init_retry;

@@ -36,7 +36,7 @@
 //EEPROM 24LC64)
 #define EEPROM_ADDR  0     						// Dirección para saber si ya está configurado
 #define EEPROM_VAL   0x55  						// Valor indicar memoria válida
-#define EEPROM_START_ADDR  10   		// Dirección donde empiezan los datos de riego
+#define EEPROM_START_ADDR  50   		        // Dirección donde empiezan los datos de riego
 
 // Definición de las teclas del nuevo teclado
 char teclado_map[][3]={ {'1','2','3'},
@@ -71,8 +71,10 @@ volatile int view_day = 1; 								// Controla que día se visualiza en el LCD
 // Estructura de datos para la programación semanal del riego
 // LR[8][2] para poder usar índices 1-7 directamente (coincidiendo con RTC dayOfWeek)
 // índice 0 no se usa para evitar restar (día - 1).
-// LR [Día] [Línea] -> Día 1..7, Línea 0..1
-linea_riego LR[8] [2];  		// Array de 7 días (de 1 a 8) y 2 líneas -> se puede ampliar para poner sesiones de riego al día LR[8] [2] [3]
+// LR [Día] [Línea] -> Día 1..7, Línea 0..2
+linea_riego LR[8] [3];  		// Array de 7 días (de 1 a 8) y 3 líneas -> se puede ampliar para poner sesiones de riego al día LR[8] [2] [3]
+
+volatile bool mostrar_oculta = false;       // controlar visualización de línea oculta
 
 // Variables turnomatic
 volatile int count = 0;
@@ -97,6 +99,7 @@ void printTwoDigits(int number);
 void guardar_programacion();
 void cargar_programacion();
 void reset_programacion();
+void guardar_header_eeprom();
 
 void setup() {
 	// CANALES SERIE
@@ -149,13 +152,22 @@ void setup() {
     else if (digitalRead(MODO_VER) == LOW) modo_priego = VER;
     else if (digitalRead(MODO_AUTOMATICO) == LOW) modo_priego = AUTO;
 
-	/// EXPANSOR I2C PCA9555
-	// declaración del pin para que interrumpa el PCA9555  ->interrupción INT1 (pin 20)
+	// EXPANSOR I2C PCA9555
+	// declaración del pin para que interrumpa el PCA9555  -> interrupción INT1 (pin 20)
 	pinMode(20,INPUT_PULLUP);
 
-	/// EXPANSOR PCA9555
+	// EXPANSOR PCA9555
 	initPCA();
-    setPCA_Output(0);	// válvulas apagadas al inicio
+    setPCA_Output(0);	// válvulas apagadas al inicio [L0 y L1]
+    // Apagar válvula oculta (Puerto 0) [L2]
+    i2c_start();
+    i2c_write_byte(D_PCA9555);
+    i2c_rbit();
+    i2c_write_byte(0x02);      // Seleccionar Output Port 0
+    i2c_rbit();
+    i2c_write_byte(0x00);      // Escribir 0 (Apagar)
+    i2c_rbit();
+    i2c_stop();
 
     // GESTIÓN MEMORIA
     // Comprobar si la memoria ya tiene datos válidos
@@ -265,28 +277,6 @@ ISR(PCINT0_vect) {
         estado_valvulas = 0;
         setPCA_Output(0);
     }
-
-	/*int val = PINB & 0x0F;
-	// val = 0000 0111 -> MODO MAN
-	// val = 0000 1011 -> MODO PROG
-	// val = 0000 1101 -> MODO VER
-	// val = 0000 1110 -> MODO AUTO
-	switch(val) {
-		case 7:				// Modo MAN
-			Serial.println("MODO MANUAL");
-			break;
-		case 11:			// Modo PROG
-			Serial.println("MODO PROGRAMACION");
-			break;
-		case 13:			// Modo VER
-			Serial.println("MODO VER");
-			break;
-		case 14:			// Modo AUTO
-			Serial.println("MODO AUTO");
-			break;
-		default:
-			break;
-	}*/
 }
 
 // INTERRUPCION PANTALLA
@@ -300,7 +290,33 @@ ISR(TIMER1_OVF_vect) {
     printTwoDigits(current_hour); Serial3.print(":");
     printTwoDigits(current_min); Serial3.print(":");
     printTwoDigits(current_sec); Serial3.print("   ");
-    Serial3.print(smodo_riego[modo_priego]); 
+    Serial3.print(smodo_riego[modo_priego]);
+
+    //LÍNEA 2 -> LR2 OCULTA 
+    Serial3.write(0xFE); 
+    Serial3.write(0xC0);    // Dirección línea 2
+    if (mostrar_oculta) {
+        Serial3.print("R2: ");
+        int i = 2;      // Línea 2
+        
+        if (modo_priego != MAN) {
+             int estado_guardado = LR[display_d][i].estado;
+             if (estado_guardado == 0) {
+                 Serial3.print("OFF             ");
+             } else if (estado_guardado == 1) {
+                 Serial3.print("ON              ");
+             } else if (estado_guardado == 2) {
+                 printTwoDigits(LR[display_d][i].hi.hh); Serial3.print(":");
+                 printTwoDigits(LR[display_d][i].hi.mm); Serial3.print(":");
+                 printTwoDigits(LR[display_d][i].hi.ss); 
+                 Serial3.print("  ");
+                 printTwoDigits(LR[display_d][i].T.mm); Serial3.print(":");
+                 printTwoDigits(LR[display_d][i].T.ss);
+             }
+        }
+    } else {
+        Serial3.print("                    ");         // Limpiar línea cuando no se muestra
+    }
 
     // LÍNEAS 3 y 4: INFORMACIÓN DE RIEGO 
     for(int i=0; i<2; i++) {
@@ -416,8 +432,8 @@ void opcion_riego() {
 		return;
     }
     
-    int l = readInt("Linea (0-1): ");
-    if (l < 0 || l > 1) {
+    int l = readInt("Linea (0-1-2): ");
+    if (l < 0 || l > 2) {
 		Serial.println("Linea incorrecta");
 		return;
     }
@@ -476,13 +492,30 @@ void showMenu() {
 
 // Control de válvulas de riego: valv0, valv1
 void set_valvula(int valvula, int estado) {
-	if (estado == 1) estado_valvulas |= (1 << valvula);
-	else estado_valvulas &= ~(1 << valvula);
-    setPCA_Output(estado_valvulas);
+    if (valvula == 0 || valvula == 1) {
+        if (estado == 1) estado_valvulas |= (1 << valvula);
+        else estado_valvulas &= ~(1 << valvula);
+        setPCA_Output(estado_valvulas);
+    } else if (valvula == 2) {
+        byte estado_LR2 = 0;
+        if (estado == 1) estado_LR2 = 0x80;         // Bit 7 a 1 (1000 0000)
+        else estado_LR2 = 0x00;                     // Bit 7 a 0
+
+        //Escribir en registro 2
+        i2c_start();
+        i2c_write_byte(D_PCA9555);
+        i2c_rbit();
+        i2c_write_byte(0x02);               // Puntero a Output Port 0 (Registro 2)
+        i2c_rbit();
+        i2c_write_byte(estado_LR2);         // Escribir estado
+        i2c_rbit();
+        i2c_stop();
+    }
 }
 
 // exploración del teclado
 void teclado(int col) {
+    if (col >= 3) return;
 	//leer filas del teclado y detectar si hay pulsación
 	int val = PINL >> 4;
 	if (val == 15) return;
@@ -509,7 +542,15 @@ void setBuffer(int row, int col) {
 
 void readLastKeyboardRow(int col) {
 	if (col == 2) { 	//col = 2  -> #
-		count = buffer.toInt();
+		int command = buffer.toInt();
+
+        if (command == 3) mostrar_oculta = true;        // Visualizar LR2
+        else if (command == 9) {                        // Ocultar LR2 y Guardar cabecera
+            mostrar_oculta = false;
+            guardar_header_eeprom();
+        }
+
+		count = command;
 		buffer="";
 		tone(SPEAKER, 1000, 100);
 	} else {
@@ -547,9 +588,9 @@ void guardar_programacion() {
     Serial.println("Guardando en EEPROM...");
     int addr = EEPROM_START_ADDR;
     
-    // Recorrer 7 días (índices 1 al 7) y 2 líneas (0 al 1)
+    // Recorrer 7 días (índices 1 al 7) y 3 líneas (0 al 2)
     for (int d = 1; d <= 7; d++) {
-        for (int l = 0; l < 2; l++) {
+        for (int l = 0; l < 3; l++) {
 			// Guardar el estado
             eeprom_write_int(addr, LR[d] [l].estado);
 			addr += 2;
@@ -582,7 +623,7 @@ void cargar_programacion() {
     int addr = EEPROM_START_ADDR;
     
     for (int d = 1; d <= 7; d++) {
-        for (int l = 0; l < 2; l++) {
+        for (int l = 0; l < 3; l++) {
             // Leemos el estado
             LR[d][l].estado = eeprom_read_int(addr); addr += 2;
             
@@ -602,13 +643,42 @@ void cargar_programacion() {
 // Inicializa la estructura a 0 (solo se usa si la EEPROM está vacía/nueva)
 void reset_programacion() {
     for (int d = 1; d <= 7; d++) {
-        for (int l = 0; l < 2; l++) {
+        for (int l = 0; l < 3; l++) {
             LR[d][l].estado = 0;
             LR[d][l].hi.hh = 0; LR[d][l].hi.mm = 0; LR[d][l].hi.ss = 0;
             LR[d][l].T.mm = 0; LR[d][l].T.ss = 0;
         }
     }
     guardar_programacion(); // Guardamos los ceros en memoria
+}
+
+void guardar_header_eeprom() {
+    // D[dia] HH:MM:SS [MODO]
+    
+    String header = "D" + String(current_day) + " ";
+    
+    if (current_hour < 10) header += "0";
+    header += String(current_hour) + ":";
+    
+    if (current_min < 10) header += "0";
+    header += String(current_min) + ":";
+    
+    if (current_sec < 10) header += "0";
+    header += String(current_sec) + "   ";
+    
+    header += smodo_riego[modo_priego];
+    
+    // Escribir en memoria (dirección 0)
+    Serial.println("Guardando Header en EEPROM...");
+    Serial.println(header);
+    
+    int len = header.length();
+    for (int i = 0; i < len; i++) {
+        write_in_memory(i, header.charAt(i));
+        delay(5);           // pausa escritura
+    }
+    
+    Serial.println("Guardado OK");
 }
 
 void loop() {
@@ -694,8 +764,8 @@ void loop() {
             break;
 
         case 3:	//MODO AUTO
-			// Recorrer líneas de riego (0 y 1)
-            for(int i=0; i<2; i++) {
+			// Recorrer líneas de riego (0, 1 y 2)
+            for(int i=0; i<3; i++) {
                 // Obtener configuración para el día de HOY y la línea i
                 // current_day viene del RTC (1..7)
                 int estado_prog = LR[current_day][i].estado;
