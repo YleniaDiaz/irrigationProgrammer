@@ -184,67 +184,44 @@ void setup() {
 
 // Visualización entrelazada display-teclado 4x3 (turnomatic)
 ISR(TIMER3_COMPC_vect){
-	PORTL = DOFF;		//bloquea el display
+	PORTL = DOFF;           // Apagar todo
 
-    // Si estamos en modo AUTO+, forzamos visualizar variable autoplus 
-    // Usamos la variable 'count' temporalmente o una lógica paralela.
-    // Si es AUTOPLUS, sobrescribimos lo que se iba a mostrar:
-    
-    int valor_a_mostrar = count; // Por defecto
-    if (modo_priego == AUTOPLUS) valor_a_mostrar = autoplus; // Mostramos porcentaje
-	
-	if (displayMode == 4) { 	// Modo domótica
-		int anguloActual = angulo[servo];
-		int anguloAbs = abs(anguloActual);
-		
-		switch (digit) {
-			case 0: 
-				PORTA = tabla_7seg[anguloAbs%10];  	//Visualización unidades de los grados
-				PORTL  = D4;
-				break;
-			case 1: 
-				PORTA = tabla_7seg[anguloAbs / 10%10]; 	//Visualización decenas de los grados
-				PORTL  = D3;
-				break;
-			case 2: 
-				if (anguloActual < 0) PORTA = negativeValue;	// Visualización - si el angulo es negativo
-				else PORTA = 0x00;	// Apagar
-				PORTL = D2;
-				break;
-			case 3:
-				PORTA = tabla_7seg[servo]; 	// visualizar en millar el servo seleccionado
-				PORTL  = D1;
-				break;
-		}
-	} else { 	// Modo turnomatic
-		switch (digit) {
-			case 0: 
-				if (displayMode == 1 ||  displayMode == 2) PORTA = tabla_7seg[valor_a_mostrar%10];  	//Visualización unidades
-				else PORTA = 0x00;  // Apagar
-				PORTL  = D4;
-				break;
-			case 1: 
-				if (displayMode == 1  ||  displayMode == 2) PORTA = tabla_7seg[int(valor_a_mostrar / 10)%10]; 	//Visualización decenas
-				else PORTA = 0x00;	// Apagar
-				PORTL  = D3;
-				break;
-			case 2: 
-				if (displayMode == 1 ) PORTA = tabla_7seg[int(valor_a_mostrar / 100)%10];	//Visualización centenas
-				else if (displayMode == 3) PORTA = tabla_7seg[valor_a_mostrar%10];	// visualizar unidades
-				else PORTA = 0x00;	// Apagar
-				PORTL  = D2;
-				break;
-			case 3:
-				if (displayMode == 3) PORTA = tabla_7seg[int(valor_a_mostrar / 10)%10]; 	// visualizar decenas
-				else PORTA = 0x00;	// Apagar
-				PORTL  = D1;
-				break;
-		}
-		teclado(digit);
-	}
-	
-	if (digit == 0 || digit == 1 || digit == 2) digit++;
-	else digit = 0;
+    int valor_a_mostrar = 0;
+
+    // 1. ELEGIR QUÉ MOSTRAR
+    if (modo_priego == AUTOPLUS) {
+        valor_a_mostrar = autoplus; // AUTO+ -> variable porcentaje
+    } else {
+        valor_a_mostrar = count;    // resto de modos -> contador
+    }
+
+    switch (digit) {
+        case 0: // Unidades
+            PORTA = tabla_7seg[valor_a_mostrar % 10]; 
+            PORTL = D4;
+            break;
+        case 1: // Decenas
+            PORTA = tabla_7seg[(valor_a_mostrar / 10) % 10];
+            PORTL = D3;
+            break;
+        case 2: // Centenas - solo necesario si llegamos a 100%
+            if (valor_a_mostrar >= 100) {
+                PORTA = tabla_7seg[1];      // Pintar 1
+            } else {
+                PORTA = 0x00;               // Apagar si es menor de 100
+            }
+            PORTL = D2;
+            break;
+        case 3: // Millares
+            PORTA = 0x00;       // apagado
+            PORTL = D1;
+        break;
+    }
+
+    teclado(digit);
+
+    if (digit < 3) digit++;
+    else digit = 0;
 }
 
 //ISR del switch rotatorio: PCINT0-1-2-3, pines: 53-52-51-50, Modos: AUTO-VER-PROG-MANUAL
